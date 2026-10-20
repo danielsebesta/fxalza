@@ -133,7 +133,7 @@ export const LLMS_TXT = `# fxalza
 
 > ${DESCRIPTION}
 
-Stačí v odkazu na produkt přepsat www.alza.cz na ${new URL(PUBLIC_URL).hostname} a Discord ukáže cenu, slevy, kupóny a klubové ceny.
+Stačí v odkazu na produkt přepsat alza.cz na ${new URL(PUBLIC_URL).hostname} a Discord ukáže cenu, slevy, kupóny a klubové ceny.
 
 - [Úvodní stránka](${PUBLIC_URL}/): návod a převodník odkazů
 - [Zdrojový kód](${GITHUB}): licence MIT
@@ -226,20 +226,20 @@ export function landingHtml(host: string, disclaimer: string): string {
   <p class="sub">Náhledy odkazů z Alzy v Discordu</p>
 </header>
 
-<p>Pošleš odkaz z Alzy a v Discordu zůstane holý text. V odkazu změň <code>www.alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
+<p>Pošleš odkaz z Alzy a v Discordu zůstane holý text. V odkazu změň <code>alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
 
 <figure><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu v Discordu" loading="lazy" scrolling="no"></iframe></figure>
 
 <h2>Jak na to</h2>
 <ol>
   <li>Otevři produkt na Alze a zkopíruj odkaz.</li>
-  <li>Nahraď <code>www.alza.cz</code> za <code>${h}</code>, nebo použij políčko níž.</li>
+  <li>Nahraď <code>alza.cz</code> za <code>${h}</code>, nebo použij políčko níž.</li>
   <li>Pošli to do Discordu. Kdo na odkaz klikne, skončí rovnou na Alze.</li>
 </ol>
 <div class="try">
   <label for="in">Odkaz z Alzy</label>
   <div class="row">
-    <input id="in" type="url" inputmode="url" placeholder="https://www.alza.cz/…-d1234567.htm" autocomplete="off" spellcheck="false">
+    <input id="in" type="url" inputmode="url" placeholder="alza.cz/…-d1234567.htm" autocomplete="off" spellcheck="false">
     <button id="copy" type="button" disabled>Zkopírovat</button>
   </div>
   <p id="out" class="small" aria-live="polite">Vlož odkaz z Alzy.</p>
