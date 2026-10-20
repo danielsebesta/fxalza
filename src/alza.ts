@@ -47,13 +47,13 @@ const AVAILABILITY_CS: Record<string, string> = {
 const BENEFITS_ENABLED = process.env.BENEFITS !== "0";
 const BENEFITS_GRACE_MS = Number(process.env.BENEFITS_GRACE_MS ?? 1500);
 
-interface TierDef {
+export interface TierDef {
   name: string;
   pgrik: string;
   reference?: boolean;
 }
 
-const TIERS: TierDef[] = [
+export const TIERS: TierDef[] = [
   { name: "Gold", pgrik: "p_pg4_e6c95" },
   { name: "Silver", pgrik: "p_pg3_36eef" },
   { name: "ISIC", pgrik: "p_pg3is1_2b2fc" },
@@ -62,7 +62,7 @@ const TIERS: TierDef[] = [
   { name: "Basic", pgrik: "p__26752", reference: true },
 ];
 
-interface PriceCandidate {
+export interface PriceCandidate {
   amount: number;
   promo: boolean;
   priceType: number | null;
@@ -70,7 +70,7 @@ interface PriceCandidate {
   coupon: string;
 }
 
-interface TierResult {
+export interface TierResult {
   tier: string;
   hidden: boolean;
   selected: PriceCandidate | null;
@@ -134,7 +134,7 @@ function computeTier(pricing: any, reference: boolean): Omit<TierResult, "tier">
   return { hidden: false, selected, main: mainCandidate, promos, ...(compare ? { compare: compare.amount } : {}) };
 }
 
-async function fetchTier(id: string, tier: TierDef): Promise<TierResult | null> {
+export async function fetchTier(id: string, tier: TierDef): Promise<TierResult | null> {
   const url = `https://webapi.alza.cz/api/commodity/v1/${id}/detailPriceInfoV3?country=CZ&pgrik=${tier.pgrik}&ucik=null`;
   let res;
   try {
@@ -177,11 +177,34 @@ interface BenefitsResult {
 }
 
 const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 1200);
+const LEAN_TIERS = process.env.TIERS_LEAN !== "0";
+const FETCHED_TIERS = LEAN_TIERS ? TIERS.filter((t) => t.name !== "Silver" && t.name !== "Bronze") : TIERS;
+
+function clubPriceVisible(t: TierResult | undefined, base: number | null): boolean {
+  return !!t && !t.hidden && !!t.main && !!t.selected && base !== null && t.main.amount < base - 0.004;
+}
+
+// Sampled 93 products: Silver always priced like ISIC and Bronze like B2B whenever Gold is
+// visible, and all of Silver/ISIC/Bronze were hidden whenever Gold was. So those two are copied.
+export function expandLeanTiers(byTier: Map<string, TierResult>): Map<string, TierResult> {
+  const out = new Map(byTier);
+  const base = byTier.get("Basic")?.main?.amount ?? null;
+  if (!clubPriceVisible(byTier.get("Gold"), base)) return out;
+  for (const [from, into] of [["ISIC", "Silver"], ["B2B", "Bronze"]] as const) {
+    const src = byTier.get(from);
+    if (src && !out.has(into)) out.set(into, { ...src, tier: into });
+  }
+  return out;
+}
 
 async function fetchBenefits(id: string): Promise<BenefitsResult> {
   const byTier = new Map<string, TierResult>();
+  const done = (m: Map<string, TierResult>): BenefitsResult => {
+    const r = buildBenefits(LEAN_TIERS ? expandLeanTiers(m) : m);
+    return { ...r, complete: FETCHED_TIERS.every((t) => m.has(t.name)) };
+  };
   const all = Promise.all(
-    TIERS.map((t) =>
+    FETCHED_TIERS.map((t) =>
       fetchTier(id, t)
         .then((r) => {
           if (r) byTier.set(r.tier, r);
@@ -197,13 +220,13 @@ async function fetchBenefits(id: string): Promise<BenefitsResult> {
     }),
   ]);
   clearTimeout(timer);
-  if (inTime) return buildBenefits(byTier);
-  const early = buildBenefits(new Map(byTier));
-  console.log(`[benefits] ${id} ${byTier.size}/${TIERS.length} tiers after ${TIER_SOFT_MS}ms, the rest follows`);
-  return { ...early, later: all.then(() => buildBenefits(byTier)) };
+  if (inTime) return done(byTier);
+  const early = done(new Map(byTier));
+  console.log(`[benefits] ${id} ${byTier.size}/${FETCHED_TIERS.length} tiers after ${TIER_SOFT_MS}ms, the rest follows`);
+  return { ...early, later: all.then(() => done(byTier)) };
 }
 
-function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
+export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
 
   const basic = byTier.get("Basic");
   const base = basic?.main?.amount ?? null;
