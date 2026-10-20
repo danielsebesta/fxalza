@@ -86,8 +86,26 @@ export const LANDING_CSP = [
 const FONT_CSS = `@font-face{font-family:"Roboto";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/roboto-latin-ext.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
 @font-face{font-family:"Roboto";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/roboto-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}`;
 
+function blob(size: string, at: string, rgb: string, alpha: number): string {
+  const stops = Array.from({ length: 11 }, (_, i) => {
+    const t = i / 10;
+    return `rgba(${rgb},${(alpha * Math.exp(-4.2 * t * t)).toFixed(3)}) ${i * 10}%`;
+  });
+  return `radial-gradient(${size} at ${at},${stops.join(",")})`;
+}
+
+const MESH_GRADIENT = [
+  blob("36% 40%", "16% 12%", "15,111,197", 0.78),
+  blob("32% 36%", "84% 8%", "32,92,214", 0.6),
+  blob("28% 24%", "50% 2%", "56,140,255", 0.4),
+  blob("34% 32%", "76% 58%", "10,74,150", 0.5),
+  blob("32% 36%", "8% 74%", "15,111,197", 0.46),
+  blob("28% 32%", "92% 94%", "26,86,190", 0.42),
+].join(",");
+
 const MESH_CSS = `html{background:var(--bg);min-height:100%}
-html::before{content:"";position:fixed;inset:-25%;z-index:-1;pointer-events:none;background:radial-gradient(44% 48% at 16% 12%,rgba(15,111,197,.78),transparent 70%),radial-gradient(38% 44% at 84% 8%,rgba(32,92,214,.6),transparent 70%),radial-gradient(34% 30% at 50% 2%,rgba(56,140,255,.4),transparent 70%),radial-gradient(42% 40% at 76% 58%,rgba(10,74,150,.5),transparent 70%),radial-gradient(40% 44% at 8% 74%,rgba(15,111,197,.46),transparent 70%),radial-gradient(34% 38% at 92% 94%,rgba(26,86,190,.42),transparent 70%);opacity:.14;filter:blur(56px);animation:mesh 32s ease-in-out infinite alternate}
+html::before{content:"";position:fixed;inset:-25%;z-index:-1;pointer-events:none;background:${MESH_GRADIENT};opacity:.14;animation:mesh 32s ease-in-out infinite alternate}
+html::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.04;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 @keyframes mesh{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.1)}}
 @media (prefers-color-scheme:light){html::before{opacity:.09}}
 @media (prefers-reduced-motion:reduce){html::before{animation:none}}`;
