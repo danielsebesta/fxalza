@@ -173,14 +173,37 @@ function promoTag(c: PriceCandidate): string {
 interface BenefitsResult {
   entries: BenefitEntry[];
   complete: boolean;
+  later?: Promise<BenefitsResult>;
 }
 
+const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 1200);
+
 async function fetchBenefits(id: string): Promise<BenefitsResult> {
-  const settled = await Promise.allSettled(TIERS.map((t) => fetchTier(id, t)));
   const byTier = new Map<string, TierResult>();
-  for (const s of settled) {
-    if (s.status === "fulfilled" && s.value) byTier.set(s.value.tier, s.value);
-  }
+  const all = Promise.all(
+    TIERS.map((t) =>
+      fetchTier(id, t)
+        .then((r) => {
+          if (r) byTier.set(r.tier, r);
+        })
+        .catch(() => {}),
+    ),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const inTime = await Promise.race([
+    all.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), TIER_SOFT_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (inTime) return buildBenefits(byTier);
+  const early = buildBenefits(new Map(byTier));
+  console.log(`[benefits] ${id} ${byTier.size}/${TIERS.length} tiers after ${TIER_SOFT_MS}ms, the rest follows`);
+  return { ...early, later: all.then(() => buildBenefits(byTier)) };
+}
+
+function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
 
   const basic = byTier.get("Basic");
   const base = basic?.main?.amount ?? null;
@@ -448,6 +471,10 @@ export async function fetchProduct(
   if (ready) {
     benefits = ready.b.entries;
     partial = !ready.b.complete;
+    void ready.b.later?.then((l) => {
+      console.log(`[benefits] ${id} completed late (${l.entries.length})`);
+      onLateBenefits?.(l.entries, l.complete);
+    });
   }
   else {
     console.log(`[benefits] ${id} not ready after ${BENEFITS_GRACE_MS}ms, answering without them`);
@@ -456,6 +483,7 @@ export async function fetchProduct(
         console.log(`[benefits] ${id} arrived late (${b.entries.length})`);
         onLateBenefits?.(b.entries, b.complete);
       }
+      void b.later?.then((l) => onLateBenefits?.(l.entries, l.complete));
     });
   }
 
