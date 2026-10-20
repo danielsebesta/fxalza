@@ -304,6 +304,7 @@ export function landingHtml(host: string, disclaimer: string): string {
   <li>cena s kódem, cashbackem, výkupním bonusem nebo AlzaPlus+</li>
   <li>klubové ceny Gold, Silver, Bronze, ISIC a B2B, když jsou levnější</li>
   <li>krátký popis produktu a dostupnost</li>
+  <li>tlačítka na produkt na Alze a na historii ceny v Hlídači shopů</li>
 </ul>
 
 <h2>Neoficiální a open source</h2>
@@ -311,9 +312,10 @@ export function landingHtml(host: string, disclaimer: string): string {
 
 <h2>Poděkování</h2>
 <ul class="credits">
-  <li><a href="https://github.com/DeRus0/Alza-Benefit-Prices" rel="noopener">Alza Benefit Prices</a> (Tampermonkey skript od Dexnise): logika klubových ceníků a jejich barvy</li>
-  <li><a href="https://github.com/lukabudik/alza-mcp-community" rel="noopener">alza-mcp-community</a> (MCP server pro Alzu): průchod přes Cloudflare a nápad s <code>utm_source</code></li>
-  <li><a href="https://github.com/FxEmbed/FxEmbed" rel="noopener">FxEmbed</a>: stejný nápad pro X a Bluesky, seznam botů a drobnosti</li>
+  <li><a href="https://github.com/FxEmbed/FxEmbed" rel="noopener">FxEmbed</a> (MIT) - inspirace a rozpoznávání botů</li>
+  <li><a href="https://github.com/DeRus0/Alza-Benefit-Prices" rel="noopener">Alza-Benefit-Prices</a> - inspirace pro celý projekt a jeho logiku, hlavně klubové ceny a kupóny</li>
+  <li><a href="https://github.com/lukabudik/alza-mcp-community" rel="noopener">alza-mcp-community</a> (MCP server pro Alzu) - inspirace v tom, jak s Alzou komunikovat, a nápad s <code>utm_source</code></li>
+  <li><a href="https://www.hlidacshopu.cz" rel="noopener">Hlídač shopů</a> - historie cen na tlačítku v náhledu</li>
 </ul>
 
 <footer>

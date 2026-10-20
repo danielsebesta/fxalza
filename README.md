@@ -17,3 +17,5 @@ Kdo odkaz otevře v prohlížeči, skončí rovnou na Alze.
 
 - [FxEmbed](https://github.com/FxEmbed/FxEmbed) (MIT) - inspirace a rozpoznávání botů
 - [Alza-Benefit-Prices](https://github.com/DeRus0/Alza-Benefit-Prices) - inspirace pro celý projekt a jeho logiku, hlavně klubové ceny a kupóny
+- [alza-mcp-community](https://github.com/lukabudik/alza-mcp-community) (MCP server pro Alzu) - inspirace v tom, jak s Alzou komunikovat, a nápad s `utm_source`
+- [Hlídač shopů](https://www.hlidacshopu.cz) - historie cen na tlačítku v náhledu
