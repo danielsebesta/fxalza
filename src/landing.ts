@@ -261,7 +261,6 @@ export function landingHtml(host: string, disclaimer: string): string {
   <li><a href="https://github.com/DeRus0/Alza-Benefit-Prices" rel="noopener">Alza Benefit Prices</a> (Tampermonkey skript od Dexnise): logika klubových ceníků a jejich barvy</li>
   <li><a href="https://github.com/lukabudik/alza-mcp-community" rel="noopener">alza-mcp-community</a> (MCP server pro Alzu): průchod přes Cloudflare a nápad s <code>utm_source</code></li>
   <li><a href="https://github.com/FxEmbed/FxEmbed" rel="noopener">FxEmbed</a>: stejný nápad pro X a Bluesky, seznam botů a drobnosti</li>
-  <li><a href="https://github.com/Exodo0/discord-html-transcripts-v2" rel="noopener">discord-html-transcripts-v2</a>: vykreslení ukázky karty</li>
 </ul>
 
 <footer>

@@ -17,4 +17,3 @@ Kdo odkaz otevře v prohlížeči, skončí rovnou na Alze.
 
 - [FxEmbed](https://github.com/FxEmbed/FxEmbed) (MIT) - inspirace a rozpoznávání botů
 - [Alza-Benefit-Prices](https://github.com/DeRus0/Alza-Benefit-Prices) - inspirace pro celý projekt a jeho logiku, hlavně klubové ceny a kupóny
-- [discord-html-transcripts-v2](https://github.com/Exodo0/discord-html-transcripts-v2) (Apache-2.0) - ukázka karty na úvodní stránce
