@@ -218,7 +218,7 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
           label: "Otevřít na Alze",
           ...(emojiRef("alza_logo") ? { emoji: emojiRef("alza_logo") } : {}),
         },
-        ...(historyUrl.length <= 512 ? [{ type: 2, style: 5, url: historyUrl, label: "Hlídač shopů", emoji: { name: "📈" } }] : []),
+        ...(historyUrl.length <= 512 ? [{ type: 2, style: 5, url: historyUrl, label: "Hlídač shopů", emoji: emojiRef("hlidac_shopu") ?? { name: "📈" } }] : []),
       ],
     });
     return JSON.stringify({ component: { type: 17, accent_color: 1011653, components } }).replace(
