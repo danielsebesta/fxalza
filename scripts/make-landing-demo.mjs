@@ -147,7 +147,7 @@ async function renderProduct(p) {
     body = body.replaceAll(`https://cdn.discordapp.com/emojis/${id}.png`, `data:image/png;base64,${emojiPng[name]}`);
   }
   body = body.replaceAll("https://cdn.discordapp.com/embed/avatars/0.png", AVATAR);
-  body = body.replace(/(class="discord-message-timestamp"[^>]*>(?:<!--[^>]*-->)?)[^<]+/, "$1Dnes v 21:45");
+  body = body.replace(/(class="discord-message-timestamp"[^>]*>(?:<!--[^>]*-->)?)[^<]+/, "$1dnes");
   body = body.replace(/ url="data:[^"]*"/g, "");
   return { styles, body };
 }
