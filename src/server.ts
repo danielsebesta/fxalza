@@ -49,7 +49,7 @@ function unsupportedHtml(tld: string, target: string): string {
   <meta property="og:description" content="${esc(desc)}">
   <meta property="og:url" content="${esc(target)}">
   <meta http-equiv="refresh" content="0;url=${esc(target)}">
-  <meta name="theme-color" content="#0f6fc5">
+  <meta name="theme-color" content="#e5484d">
 </head>
 <body><p>${esc(desc)}</p><p><a href="${esc(target)}">Přejít na Alzu</a></p></body>
 </html>`;

@@ -149,7 +149,7 @@ export function problemHtml(title: string, message: string): string {
 <meta name="description" content="${esc(message)}">
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#07090d">
+<meta name="theme-color" content="#e5484d">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="fxalza">
 <meta property="og:title" content="${esc(title)}">
@@ -206,8 +206,7 @@ export function landingHtml(host: string, disclaimer: string): string {
   <meta name="application-name" content="fxalza">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#07090d" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#0f6fc5">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="format-detection" content="telephone=no">
   <link rel="canonical" href="${PUBLIC_URL}/">
