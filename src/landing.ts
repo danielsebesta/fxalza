@@ -136,7 +136,7 @@ ${DEMO_CSS}
 `;
 
 const DESCRIPTION =
-  "Open source nástroj, který v Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.";
+  "Open source nástroj, který na Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.";
 
 export const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -215,7 +215,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>fxalza - náhledy odkazů z Alzy v Discordu</title>
+  <title>fxalza - náhledy odkazů z Alzy na Discordu</title>
   <meta name="description" content="${esc(DESCRIPTION)}">
   <meta name="author" content="${AUTHOR}">
   <meta name="application-name" content="fxalza">
@@ -232,10 +232,10 @@ export function landingHtml(host: string, disclaimer: string): string {
   <meta property="og:site_name" content="fxalza">
   <meta property="og:locale" content="cs_CZ">
   <meta property="og:url" content="${PUBLIC_URL}/">
-  <meta property="og:title" content="fxalza - náhledy odkazů z Alzy v Discordu">
+  <meta property="og:title" content="fxalza - náhledy odkazů z Alzy na Discordu">
   <meta property="og:description" content="${esc(DESCRIPTION)}">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="fxalza - náhledy odkazů z Alzy v Discordu">
+  <meta name="twitter:title" content="fxalza - náhledy odkazů z Alzy na Discordu">
   <meta name="twitter:description" content="${esc(DESCRIPTION)}">
   <script type="application/ld+json">${ld}</script>
   <style>
@@ -276,18 +276,18 @@ export function landingHtml(host: string, disclaimer: string): string {
 <header>
   <img class="logo" src="/favicon.svg" width="80" height="80" alt="">
   <h1><span>fx</span>alza</h1>
-  <p class="sub">Náhledy odkazů z Alzy v Discordu</p>
+  <p class="sub">Náhledy odkazů z Alzy na Discordu</p>
 </header>
 
-<p>Pošleš odkaz z Alzy a v Discordu zůstane holý text. V odkazu změň <code>alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
+<p>Pošleš odkaz z Alzy a na Discordu zůstane holý text. V odkazu změň <code>alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
 
-<figure><div id="demo-wrap" class="demo-wrap"><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu v Discordu" loading="lazy" scrolling="no"></iframe></div></figure>
+<figure><div id="demo-wrap" class="demo-wrap"><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu na Discordu" loading="lazy" scrolling="no"></iframe></div></figure>
 
 <h2>Jak na to</h2>
 <ol>
   <li>Otevři produkt na Alze a zkopíruj odkaz.</li>
   <li>Nahraď <code>alza.cz</code> za <code>${h}</code>, nebo použij políčko níž.</li>
-  <li>Pošli to do Discordu. Kdo na odkaz klikne, skončí rovnou na Alze.</li>
+  <li>Pošli to na Discord. Kdo na odkaz klikne, skončí rovnou na Alze.</li>
 </ol>
 <div class="try">
   <label for="in">Odkaz z Alzy</label>

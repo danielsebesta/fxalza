@@ -209,7 +209,7 @@ const html =
   products
     .map(
       (p, i) =>
-        `<div class="panel"><div class="demo" role="img" aria-label="Ukázka: zpráva v Discordu s odkazem na produkt ${p.label} a kartou s cenou a výhodami">${rendered[i].body}</div>` +
+        `<div class="panel"><div class="demo" role="img" aria-label="Ukázka: zpráva na Discordu s odkazem na produkt ${p.label} a kartou s cenou a výhodami">${rendered[i].body}</div>` +
         `<figcaption>Ukazuje: ${p.kinds.map((k) => KIND_LABEL[k]).join(", ")} · ceny z ${fmtDate}</figcaption></div>`,
     )
     .join("") +
