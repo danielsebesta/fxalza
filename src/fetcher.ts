@@ -116,7 +116,14 @@ const providers: Provider[] = [
     name: "sidecar",
     enabled: () => process.env.SIDECAR_DISABLED !== "1",
     async run(url, opts, timeoutMs) {
-      const res = await sidecar.request(url, { headers: opts.headers, timeoutMs });
+      let res = await sidecar.request(url, { headers: opts.headers, timeoutMs });
+      if (!res.error && res.status === 403) {
+        // a fresh session sometimes gets a one-off 403, a second try is cheaper than a paid fallback
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const again = await sidecar.request(url, { headers: opts.headers, timeoutMs });
+        console.log(`[fetch] sidecar 403 retried -> ${again.error ? "error" : again.status} ${new URL(url).pathname}`);
+        res = again;
+      }
       if (res.error) throw new Error(res.error);
       return { status: res.status, body: Buffer.from(res.body, "base64").toString("utf8") };
     },
