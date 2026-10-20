@@ -44,14 +44,23 @@ const SCRIPT = `(function () {
     } catch (e) { msg("Tohle nevypadá jako odkaz na alza.cz."); }
   }
   var frame = document.getElementById("demo");
+  var wrap = document.getElementById("demo-wrap");
+  var DESIGN_WIDTH = 640;
   function fit() {
     var b = frame.contentDocument && frame.contentDocument.body;
-    if (b) frame.style.height = Math.ceil(b.getBoundingClientRect().height) + "px";
+    if (!b) return;
+    var scale = Math.min(1, wrap.clientWidth / DESIGN_WIDTH);
+    frame.style.width = scale < 1 ? DESIGN_WIDTH + "px" : "100%";
+    frame.style.transform = scale < 1 ? "scale(" + scale + ")" : "";
+    var h = Math.ceil(b.getBoundingClientRect().height);
+    frame.style.height = h + "px";
+    wrap.style.height = Math.ceil(h * scale) + "px";
   }
   frame.addEventListener("load", function () {
     fit();
     new ResizeObserver(fit).observe(frame.contentDocument.body);
   });
+  window.addEventListener("resize", fit);
   input.addEventListener("input", render);
   copy.addEventListener("click", function () {
     if (!link) return;
@@ -78,9 +87,9 @@ const FONT_CSS = `@font-face{font-family:"Roboto";font-style:normal;font-weight:
 @font-face{font-family:"Roboto";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/roboto-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}`;
 
 const MESH_CSS = `html{background:var(--bg);min-height:100%}
-html::before{content:"";position:fixed;inset:-25%;z-index:-1;pointer-events:none;background:radial-gradient(44% 48% at 16% 12%,rgba(15,111,197,.78),transparent 70%),radial-gradient(38% 44% at 84% 8%,rgba(32,92,214,.6),transparent 70%),radial-gradient(34% 30% at 50% 2%,rgba(56,140,255,.4),transparent 70%),radial-gradient(42% 40% at 76% 58%,rgba(10,74,150,.5),transparent 70%),radial-gradient(40% 44% at 8% 74%,rgba(15,111,197,.46),transparent 70%),radial-gradient(34% 38% at 92% 94%,rgba(26,86,190,.42),transparent 70%);opacity:.28;filter:blur(56px);animation:mesh 32s ease-in-out infinite alternate}
+html::before{content:"";position:fixed;inset:-25%;z-index:-1;pointer-events:none;background:radial-gradient(44% 48% at 16% 12%,rgba(15,111,197,.78),transparent 70%),radial-gradient(38% 44% at 84% 8%,rgba(32,92,214,.6),transparent 70%),radial-gradient(34% 30% at 50% 2%,rgba(56,140,255,.4),transparent 70%),radial-gradient(42% 40% at 76% 58%,rgba(10,74,150,.5),transparent 70%),radial-gradient(40% 44% at 8% 74%,rgba(15,111,197,.46),transparent 70%),radial-gradient(34% 38% at 92% 94%,rgba(26,86,190,.42),transparent 70%);opacity:.14;filter:blur(56px);animation:mesh 32s ease-in-out infinite alternate}
 @keyframes mesh{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.1)}}
-@media (prefers-color-scheme:light){html::before{opacity:.18}}
+@media (prefers-color-scheme:light){html::before{opacity:.09}}
 @media (prefers-reduced-motion:reduce){html::before{animation:none}}`;
 
 const BASE_CSS = `:root{color-scheme:dark;--bg:#07090d;--fg:#e7e7e7;--head:#fff;--muted:#8b8b8b;--line:#222;--a:#7cb7ff;--chip:#141414;--text:"Roboto",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--sans:var(--text)}
@@ -242,7 +251,8 @@ export function landingHtml(host: string, disclaimer: string): string {
     h2{font-size:1.5rem;line-height:1.25;letter-spacing:-.012em;font-weight:700;color:var(--head);margin:3rem 0 .5rem}
     figure{margin:2.2rem -.5rem}
     @media (min-width:46rem){figure{margin-inline:-3rem}}
-    .demo-frame{display:block;width:100%;height:34rem;border:0;overflow:hidden}
+    .demo-wrap{position:relative;overflow:hidden}
+    .demo-frame{display:block;width:100%;height:34rem;border:0;overflow:hidden;transform-origin:0 0}
     .small{font:.82rem var(--sans);color:var(--muted)}
     .try{margin:1.6rem 0;padding:1rem 0;border-block:1px solid var(--line)}
     .try label{display:block;font:500 .85rem var(--sans);margin-bottom:.5rem}
@@ -271,7 +281,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 
 <p>Pošleš odkaz z Alzy a v Discordu zůstane holý text. V odkazu změň <code>alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
 
-<figure><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu v Discordu" loading="lazy" scrolling="no"></iframe></figure>
+<figure><div id="demo-wrap" class="demo-wrap"><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu v Discordu" loading="lazy" scrolling="no"></iframe></div></figure>
 
 <h2>Jak na to</h2>
 <ol>
