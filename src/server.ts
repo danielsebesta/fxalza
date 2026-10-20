@@ -55,6 +55,7 @@ function unsupportedHtml(tld: string, target: string): string {
 </html>`;
 }
 
+const EMBED_DEADLINE_MS = Number(process.env.EMBED_DEADLINE_MS ?? 5000);
 const inflight = new Map<string, Promise<ProductData>>();
 
 function refresh(id: string, path: string): Promise<ProductData> {
@@ -100,7 +101,20 @@ async function getProduct(id: string, path: string, who: Requester): Promise<Pro
     return old ? { data: old, stale: true } : { data: null, stale: false, limited: true };
   }
   try {
-    return { data: await refresh(id, path), stale: false };
+    const pending = refresh(id, path);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const data = await Promise.race([
+      pending,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), EMBED_DEADLINE_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (data) return { data, stale: false };
+    console.warn(`[product] ${id} not ready after ${EMBED_DEADLINE_MS}ms, answering with what we have`);
+    pending.catch((e) => console.error(`[fetch] ${id} failed after the deadline: ${e instanceof Error ? e.message : e}`));
+    const old = getCached(id, true);
+    return { data: old, stale: old !== null };
   } catch (e) {
     console.error(`[fetch] ${id} failed: ${e instanceof Error ? e.message : e}`);
     const old = getCached(id, true);
@@ -210,7 +224,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     if (p.brand) parts.push(p.brand);
     if (stale) parts.push("data mohou být starší");
   } else {
-    parts.push("Odkaz na Alza.cz — cenu se nepodařilo načíst");
+    parts.push("Odkaz na Alza.cz — při načítání ceny nastala chyba");
   }
   let desc = parts.join(" • ");
   while (Buffer.byteLength(desc, "utf8") > 330 && parts.length > 1) {
