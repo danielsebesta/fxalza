@@ -4,6 +4,7 @@ import { fetchProduct, slugTitle, stopSidecar, type BenefitEntry, type ProductDa
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
+import { allowFetch, clientId, isDiscord } from "./ratelimit.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -70,13 +71,30 @@ function refresh(id: string, path: string): Promise<ProductData> {
   return p;
 }
 
-async function getProduct(id: string, path: string): Promise<{ data: ProductData | null; stale: boolean }> {
+interface Requester {
+  id: string;
+  discord: boolean;
+}
+
+interface ProductResult {
+  data: ProductData | null;
+  stale: boolean;
+  limited?: boolean;
+}
+
+async function getProduct(id: string, path: string, who: Requester): Promise<ProductResult> {
   const hit = peekCached(id);
   console.log(`[product] ${id} cache ${hit?.state ?? "miss"}`);
   if (hit?.state === "fresh") return { data: hit.data, stale: false };
+  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, who.discord);
   if (hit?.state === "stale") {
-    refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));
+    if (mayFetch()) refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));
     return { data: hit.data, stale: false };
+  }
+  if (!mayFetch()) {
+    console.warn(`[rate] ${who.discord ? "discord" : "other"} ${who.id} limited on ${id}`);
+    const old = getCached(id, true);
+    return old ? { data: old, stale: true } : { data: null, stale: false, limited: true };
   }
   try {
     return { data: await refresh(id, path), stale: false };
@@ -323,6 +341,7 @@ const server = http.createServer(async (req, res) => {
   const started = Date.now();
   const ua = String(req.headers["user-agent"] ?? "");
   const isBot = BOT_RE.test(ua);
+  const who: Requester = { id: clientId(req), discord: isDiscord(ua) };
   let logged = "";
 
   try {
@@ -426,7 +445,12 @@ const server = http.createServer(async (req, res) => {
     const isDebug = u.searchParams.get("debug") === "1";
 
     if (u.searchParams.get("format") === "json") {
-      const { data, stale } = await getProduct(parsed.id, parsed.path);
+      const { data, stale, limited } = await getProduct(parsed.id, parsed.path, who);
+      if (limited) {
+        res.writeHead(429, { "content-type": "application/json; charset=utf-8", "retry-after": "60", "cache-control": "no-store", ...CORS_HEADERS });
+        res.end(JSON.stringify({ error: "rate_limited", retryAfter: 60 }));
+        return;
+      }
       const body = JSON.stringify(
         data ? { ...data, stale } : { id: parsed.id, error: "fetch_failed", canonicalUrl: `https://www.alza.cz${parsed.path}` },
         null,
@@ -450,7 +474,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const { data, stale } = await getProduct(parsed.id, parsed.path);
+    const { data, stale, limited } = await getProduct(parsed.id, parsed.path, who);
+    if (limited) {
+      res.writeHead(429, { "content-type": "text/plain; charset=utf-8", "retry-after": "60", "cache-control": "no-store" });
+      res.end("Příliš mnoho požadavků, zkus to za chvíli.\n");
+      return;
+    }
     const html = embedHtml(data, parsed.path, stale, !isDebug);
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
