@@ -337,7 +337,7 @@ export function conditionText(itemCondition: unknown, html: string): string | nu
   if (kind === "RefurbishedCondition") return "Repasované";
   if (kind === "DamagedCondition") return "Poškozené";
   if (kind !== "UsedCondition") return null;
-  const grade = /class="stcStock[^"]*"[^>]*title="s*(Rozbaleno|Zánovní|Použité)/.exec(html)?.[1];
+  const grade = /class="stcStock[^"]*"[^>]*title="\s*(Rozbaleno|Zánovní|Použité)/.exec(html)?.[1];
   return grade ?? "Použité";
 }
 
