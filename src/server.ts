@@ -131,6 +131,20 @@ function withUtm(url: string): string {
   return url + (url.includes("?") ? "&" : "?") + UTM;
 }
 
+const CONTROL_PARAMS = new Set(["debug", "format", "v"]);
+
+function carriedQuery(params: URLSearchParams): string {
+  const kept = new URLSearchParams();
+  for (const [key, value] of params) if (!CONTROL_PARAMS.has(key)) kept.append(key, value);
+  const query = kept.toString();
+  return query.length > 0 && query.length <= 512 ? query : "";
+}
+
+function outbound(url: string, carried: string): string {
+  if (!carried) return withUtm(url);
+  return url + (url.includes("?") ? "&" : "?") + carried;
+}
+
 function fmtPct(value: number): string {
   const v = Math.round(value * 10) / 10;
   return `−${new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 1 }).format(v)} %`;
@@ -149,13 +163,14 @@ function benefitLine(e: BenefitEntry, custom = false): string {
   return `${benefitEmoji(e, true)} ${label} ${was}**${e.priceText}**${pct}`;
 }
 
-function componentEmbedJson(p: ProductData, canonical: string, img: string | null): string | null {
-  const titleLine = `### **[${mdEsc(p.name)}](${canonical})** (${p.availabilityText})`;
+function componentEmbedJson(p: ProductData, canonical: string, img: string | null, carried: string): string | null {
+  const titleUrl = carried ? outbound(canonical, carried) : canonical;
+  const titleLine = `### **[${mdEsc(p.name)}](${titleUrl})** (${p.availabilityText})`;
   const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale");
   const priceLine =
     p.priceText && !hasSale ? `${emojiMd("alza_price", "🏷️")} Cena **${p.priceText}**` : null;
   const benefitLines = [...(priceLine ? [priceLine] : []), ...(p.benefits ?? []).map((b) => benefitLine(b, true))];
-  const humanUrl = withUtm(canonical);
+  const humanUrl = outbound(canonical, carried);
 
   const desc = p.description ? mdEsc(p.description) : "";
 
@@ -206,7 +221,7 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
   return fits(lean) ? lean : null;
 }
 
-function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefresh: boolean): string {
+function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefresh: boolean, carried = ""): string {
   const fallbackTitle = slugTitle(path);
   const canonical = p?.canonicalUrl ?? `https://www.alza.cz${path}`;
 
@@ -233,7 +248,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
   }
 
   const img = p?.image ? `${p.image}?width=${IMG_W}&height=${IMG_W}` : null;
-  const componentJson = p ? componentEmbedJson(p, canonical, img) : null;
+  const componentJson = p ? componentEmbedJson(p, canonical, img, carried) : null;
 
   const tags = [
     `<meta charset="utf-8">`,
@@ -251,7 +266,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     p?.price != null ? `<meta property="product:price:amount" content="${p.price}">` : "",
     p?.price != null ? `<meta property="product:price:currency" content="CZK">` : "",
     componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : "",
-    metaRefresh ? `<meta http-equiv="refresh" content="0;url=${esc(withUtm(canonical))}">` : "",
+    metaRefresh ? `<meta http-equiv="refresh" content="0;url=${esc(outbound(canonical, carried))}">` : "",
     `<meta name="twitter:card" content="${img ? "summary_large_image" : "summary"}">`,
     `<meta name="theme-color" content="#0f6fc5">`,
   ]
@@ -264,7 +279,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     `<p>${esc(desc)}</p>`,
     benefitRows.length > 0 ? `<ul>${benefitRows.join("")}</ul>` : "",
     img ? `<img src="${esc(img)}" width="240" alt="">` : "",
-    `<p><a href="${esc(withUtm(canonical))}">Přejít na Alza.cz</a></p>`,
+    `<p><a href="${esc(outbound(canonical, carried))}">Přejít na Alza.cz</a></p>`,
     `<p class="note">${DISCLAIMER}</p>`,
   ].filter(Boolean);
 
@@ -379,7 +394,7 @@ const server = http.createServer(async (req, res) => {
     const host = String(req.headers.host ?? "").replace(/:d+$/, "").toLowerCase();
     if (!isBot && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {
       const p = parseProductPath(u.pathname);
-      res.writeHead(302, { Location: p ? withUtm(`https://www.alza.cz${p.path}`) : `${PUBLIC_URL}/`, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+      res.writeHead(302, { Location: p ? outbound(`https://www.alza.cz${p.path}`, carriedQuery(u.searchParams)) : `${PUBLIC_URL}/`, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
       return;
     }
@@ -485,7 +500,7 @@ const server = http.createServer(async (req, res) => {
 
     if (!isBot && !isDebug) {
       const known = getCached(parsed.id, true);
-      const target = withUtm(known?.canonicalUrl ?? `https://www.alza.cz${parsed.path}`);
+      const target = outbound(known?.canonicalUrl ?? `https://www.alza.cz${parsed.path}`, carriedQuery(u.searchParams));
       res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
       return;
@@ -497,7 +512,7 @@ const server = http.createServer(async (req, res) => {
       res.end("Příliš mnoho požadavků, zkus to za chvíli.\n");
       return;
     }
-    const html = embedHtml(data, parsed.path, stale, !isDebug);
+    const html = embedHtml(data, parsed.path, stale, !isDebug, carriedQuery(u.searchParams));
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
@@ -507,13 +522,16 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     console.error("[server] error:", e);
     let fallback: Parsed | null = null;
+    let fallbackQuery = "";
     try {
-      fallback = parseProductPath(new URL(req.url ?? "/", "http://localhost").pathname);
+      const requested = new URL(req.url ?? "/", "http://localhost");
+      fallback = parseProductPath(requested.pathname);
+      fallbackQuery = carriedQuery(requested.searchParams);
     } catch {
       fallback = null;
     }
     if (!res.headersSent && isBot && fallback) {
-      const html = embedHtml(null, fallback.path, false, true);
+      const html = embedHtml(null, fallback.path, false, true, fallbackQuery);
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
