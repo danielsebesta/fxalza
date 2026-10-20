@@ -384,16 +384,16 @@ export async function fetchProduct(
   path: string,
   onLateBenefits?: (benefits: BenefitEntry[]) => void,
 ): Promise<ProductData> {
+  const html = await getHtml(path);
+  const p = extractProductJsonLd(html);
+  if (!p) throw new Error("no Product JSON-LD found on the page");
+
   const benefitsPromise: Promise<BenefitEntry[]> = BENEFITS_ENABLED
     ? fetchBenefits(id).catch((e) => {
         console.error(`[benefits] ${id}: ${e instanceof Error ? e.message : e}`);
         return [] as BenefitEntry[];
       })
     : Promise.resolve([] as BenefitEntry[]);
-
-  const html = await getHtml(path);
-  const p = extractProductJsonLd(html);
-  if (!p) throw new Error("no Product JSON-LD found on the page");
 
   const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
 
