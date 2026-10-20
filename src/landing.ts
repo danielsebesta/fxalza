@@ -300,15 +300,6 @@ export function landingHtml(host: string, disclaimer: string): string {
   <p id="out" class="small" aria-live="polite">Vlož odkaz z Alzy.</p>
 </div>
 
-<h2>Co se ukáže</h2>
-<ul>
-  <li>cena, případně původní cena a sleva v procentech</li>
-  <li>cena s kódem, cashbackem, výkupním bonusem nebo AlzaPlus+</li>
-  <li>klubové ceny Gold, Silver, Bronze, ISIC a B2B, když jsou levnější</li>
-  <li>krátký popis produktu a dostupnost</li>
-  <li>tlačítka na produkt na Alze a na historii ceny v Hlídači shopů</li>
-</ul>
-
 <h2>Neoficiální a open source</h2>
 <p>Kód je pod licencí MIT: <a href="${GITHUB}" rel="noopener">github.com/danielsebesta/fxalza</a>. Nejsme oficiální produkt Alzy a s Alza.cz nijak nesouvisíme. Značka a logo patří jejich vlastníkům. Ceny můžou být zastaralé, rozhoduje vždy web Alzy.</p>
 
