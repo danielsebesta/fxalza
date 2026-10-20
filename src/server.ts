@@ -49,9 +49,11 @@ const inflight = new Map<string, Promise<ProductData>>();
 function refresh(id: string, path: string): Promise<ProductData> {
   let p = inflight.get(id);
   if (!p) {
-    p = fetchProduct(id, path, (benefits) => {
+    p = fetchProduct(id, path, (benefits, complete) => {
       const current = getCached(id, true);
-      if (current) putCached(id, { ...current, benefits });
+      if (!current) return;
+      const { partial: _, ...rest } = current;
+      putCached(id, { ...rest, benefits, ...(complete ? {} : { partial: true as const }) });
     })
       .then((d) => {
         negative.delete(id);

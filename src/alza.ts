@@ -27,6 +27,7 @@ export interface ProductData {
   image: string | null;
   canonicalUrl: string;
   benefits: BenefitEntry[];
+  partial?: true;
   fetchedAt: string;
 }
 
@@ -169,7 +170,12 @@ function promoTag(c: PriceCandidate): string {
   return c.name || "akce";
 }
 
-async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
+interface BenefitsResult {
+  entries: BenefitEntry[];
+  complete: boolean;
+}
+
+async function fetchBenefits(id: string): Promise<BenefitsResult> {
   const settled = await Promise.allSettled(TIERS.map((t) => fetchTier(id, t)));
   const byTier = new Map<string, TierResult>();
   for (const s of settled) {
@@ -275,7 +281,7 @@ async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
     tier: 5,
   };
   entries.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.price - b.price);
-  return entries.slice(0, 8);
+  return { entries: entries.slice(0, 8), complete: byTier.size === TIERS.length };
 }
 
 export class UpstreamError extends Error {
@@ -382,18 +388,18 @@ function cleanDescription(raw: unknown): string | undefined {
 export async function fetchProduct(
   id: string,
   path: string,
-  onLateBenefits?: (benefits: BenefitEntry[]) => void,
+  onLateBenefits?: (benefits: BenefitEntry[], complete: boolean) => void,
 ): Promise<ProductData> {
   const html = await getHtml(path);
   const p = extractProductJsonLd(html);
   if (!p) throw new Error("no Product JSON-LD found on the page");
 
-  const benefitsPromise: Promise<BenefitEntry[]> = BENEFITS_ENABLED
+  const benefitsPromise: Promise<BenefitsResult> = BENEFITS_ENABLED
     ? fetchBenefits(id).catch((e) => {
         console.error(`[benefits] ${id}: ${e instanceof Error ? e.message : e}`);
-        return [] as BenefitEntry[];
+        return { entries: [], complete: false };
       })
-    : Promise.resolve([] as BenefitEntry[]);
+    : Promise.resolve({ entries: [], complete: true });
 
   const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
 
@@ -430,6 +436,7 @@ export async function fetchProduct(
   if (image && !httpsUrlOn(image, "alza.cz")) image = null;
 
   let benefits: BenefitEntry[] = [];
+  let partial = true;
   let grace: ReturnType<typeof setTimeout> | undefined;
   const ready = await Promise.race([
     benefitsPromise.then((b) => ({ b })),
@@ -438,13 +445,16 @@ export async function fetchProduct(
     }),
   ]);
   clearTimeout(grace);
-  if (ready) benefits = ready.b;
+  if (ready) {
+    benefits = ready.b.entries;
+    partial = !ready.b.complete;
+  }
   else {
     console.log(`[benefits] ${id} not ready after ${BENEFITS_GRACE_MS}ms, answering without them`);
     void benefitsPromise.then((b) => {
-      if (b.length > 0) {
-        console.log(`[benefits] ${id} arrived late (${b.length})`);
-        onLateBenefits?.(b);
+      if (b.entries.length > 0 || b.complete) {
+        console.log(`[benefits] ${id} arrived late (${b.entries.length})`);
+        onLateBenefits?.(b.entries, b.complete);
       }
     });
   }
@@ -463,6 +473,7 @@ export async function fetchProduct(
     image,
     canonicalUrl,
     benefits,
+    ...(partial ? { partial: true as const } : {}),
     fetchedAt: new Date().toISOString(),
   };
 }

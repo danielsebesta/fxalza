@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FILE = path.resolve(__dirname, "../data/cache.json");
 const TTL_MS = Number(process.env.CACHE_TTL_MS ?? 24 * 3600 * 1000);
 const MAX_STALE_MS = Number(process.env.CACHE_MAX_STALE_MS ?? 7 * 24 * 3600 * 1000);
+const PARTIAL_TTL_MS = Number(process.env.CACHE_PARTIAL_TTL_MS ?? 5 * 60_000);
 const MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES ?? 5000);
 
 interface Entry {
@@ -79,7 +80,8 @@ export function peekCached(id: string): { data: ProductData; state: CacheState }
   mem.delete(id);
   mem.set(id, e);
   const age = Date.now() - e.at;
-  return { data: e.data, state: age <= TTL_MS ? "fresh" : age <= MAX_STALE_MS ? "stale" : "expired" };
+  const ttl = e.data.partial ? Math.min(TTL_MS, PARTIAL_TTL_MS) : TTL_MS;
+  return { data: e.data, state: age <= ttl ? "fresh" : age <= MAX_STALE_MS ? "stale" : "expired" };
 }
 
 export function getCached(id: string, allowStale = false): ProductData | null {
