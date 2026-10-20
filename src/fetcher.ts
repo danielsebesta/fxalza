@@ -23,6 +23,78 @@ const SIDECAR_COOLDOWN_MS = Number(process.env.SIDECAR_COOLDOWN_MS ?? 10_000);
 const PAID_MIN_TIMEOUT_MS = 20_000;
 const sidecar = new Sidecar();
 
+class KeyPool {
+  private name: string;
+  private keys: string[];
+  private downUntil = new Map<string, number>();
+  private cursor = 0;
+
+  constructor(name: string, raw: string | undefined) {
+    this.name = name;
+    this.keys = [...new Set((raw ?? "").split(/[\s,;]+/).filter(Boolean))];
+  }
+
+  available(): boolean {
+    return this.keys.some((k) => (this.downUntil.get(k) ?? 0) <= Date.now());
+  }
+
+  private pick(tried: Set<string>): string | null {
+    for (let i = 0; i < this.keys.length; i++) {
+      const key = this.keys[(this.cursor + i) % this.keys.length]!;
+      if (tried.has(key) || (this.downUntil.get(key) ?? 0) > Date.now()) continue;
+      this.cursor = (this.cursor + i + 1) % this.keys.length;
+      return key;
+    }
+    return null;
+  }
+
+  async run(attempt: (key: string) => Promise<{ status: number; body: string }>): Promise<{ status: number; body: string }> {
+    const tried = new Set<string>();
+    let last: { status: number; body: string } | null = null;
+    for (let key = this.pick(tried); key; key = this.pick(tried)) {
+      tried.add(key);
+      const n = this.keys.indexOf(key) + 1;
+      try {
+        const r = await attempt(key);
+        if (r.status === 401 || r.status === 402 || r.status === 429) {
+          this.down(key, n, r.status);
+          last = r;
+          continue;
+        }
+        return r;
+      } catch (e) {
+        const status = e instanceof KeyError ? e.status : 0;
+        if (status === 401 || status === 402 || status === 429) {
+          this.down(key, n, status);
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (last) return last;
+    throw new Error(this.name + ": no usable key");
+  }
+
+  private down(key: string, n: number, status: number): void {
+    const ms = status === 429 ? 60_000 : 3_600_000;
+    this.downUntil.set(key, Date.now() + ms);
+    console.warn(`[keys] ${this.name} key #${n} rejected (HTTP ${status}), paused for ${ms / 60_000} min`);
+  }
+}
+
+class KeyError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const brightdata = new KeyPool("brightdata", process.env.BRIGHTDATA_KEY);
+const scrapedo = new KeyPool("scrape.do", process.env.SCRAPEDO_TOKEN);
+const firecrawl = new KeyPool("firecrawl", process.env.FIRECRAWL_KEY);
+
 export function stopSidecar(): void {
   sidecar.stop();
 }
@@ -39,52 +111,55 @@ const providers: Provider[] = [
   },
   {
     name: "brightdata",
-    enabled: () => !!process.env.BRIGHTDATA_KEY,
-    async run(url, _opts, timeoutMs) {
-      const res = await fetch("https://api.brightdata.com/request", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${process.env.BRIGHTDATA_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          zone: process.env.BRIGHTDATA_ZONE ?? "web_unlocker1",
-          url,
-          format: "raw",
-          country: "cz",
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      return { status: res.status, body: await res.text() };
-    },
+    enabled: () => brightdata.available(),
+    run: (url, _opts, timeoutMs) =>
+      brightdata.run(async (key) => {
+        const res = await fetch("https://api.brightdata.com/request", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            zone: process.env.BRIGHTDATA_ZONE ?? "web_unlocker1",
+            url,
+            format: "raw",
+            country: "cz",
+          }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        return { status: res.status, body: await res.text() };
+      }),
   },
   {
     name: "scrape.do",
-    enabled: () => !!process.env.SCRAPEDO_TOKEN,
-    async run(url, _opts, timeoutMs) {
-      const api = `https://api.scrape.do/?token=${process.env.SCRAPEDO_TOKEN}&url=${encodeURIComponent(url)}&super=true&geoCode=cz`;
-      const res = await fetch(api, { signal: AbortSignal.timeout(timeoutMs) });
-      return { status: res.status, body: await res.text() };
-    },
+    enabled: () => scrapedo.available(),
+    run: (url, _opts, timeoutMs) =>
+      scrapedo.run(async (key) => {
+        const api = `https://api.scrape.do/?token=${key}&url=${encodeURIComponent(url)}&super=true&geoCode=cz`;
+        const res = await fetch(api, { signal: AbortSignal.timeout(timeoutMs) });
+        return { status: res.status, body: await res.text() };
+      }),
   },
   {
     name: "firecrawl",
-    enabled: () => !!process.env.FIRECRAWL_KEY,
-    async run(url, _opts, timeoutMs) {
-      const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${process.env.FIRECRAWL_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ url, formats: ["rawHtml"], location: { country: "CZ" }, timeout: timeoutMs }),
-        signal: AbortSignal.timeout(timeoutMs + 5000),
-      });
-      const j = (await res.json()) as { success?: boolean; data?: { rawHtml?: string; metadata?: { statusCode?: number } } };
-      if (!res.ok || !j.success) throw new Error(`firecrawl HTTP ${res.status}`);
-      return { status: j.data?.metadata?.statusCode ?? 200, body: j.data?.rawHtml ?? "" };
-    },
+    enabled: () => firecrawl.available(),
+    run: (url, _opts, timeoutMs) =>
+      firecrawl.run(async (key) => {
+        const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ url, formats: ["rawHtml"], location: { country: "CZ" }, timeout: timeoutMs }),
+          signal: AbortSignal.timeout(timeoutMs + 5000),
+        });
+        const j = (await res.json()) as { success?: boolean; data?: { rawHtml?: string; metadata?: { statusCode?: number } } };
+        if (!res.ok || !j.success) throw new KeyError(`firecrawl HTTP ${res.status}`, res.status);
+        return { status: j.data?.metadata?.statusCode ?? 200, body: j.data?.rawHtml ?? "" };
+      }),
   },
 ];
 
 const downUntil = new Map<string, number>();
 
 function usable(status: number, body: string): boolean {
-  if (status === 403 || status === 429 || status >= 500) return false;
+  if (status === 401 || status === 402 || status === 403 || status === 429 || status >= 500) return false;
   if (status === 200 && /<title>\s*Just a moment/i.test(body.slice(0, 4000))) return false;
   return true;
 }
