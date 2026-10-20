@@ -30,10 +30,10 @@ test("ISIC and B2B keep their own prices even when Gold is visible (Huawei MateP
   assert.deepEqual(labels, ["B2B", "ISIC", "Gold", "Silver", "Bronze"]);
 });
 
-test("club prices show the percentage with one decimal like the Alza price list", () => {
+test("club prices show the discount rounded to whole percent", () => {
   const f = fixtures.find((x) => x.id === "13028740")!;
   const shown = Object.fromEntries(buildBenefits(present(f)).entries.map((e) => [e.label, e.percentShown]));
-  assert.deepEqual(shown, { B2B: 11, ISIC: 10, Gold: 8.9, Silver: 5.9, Bronze: 3 });
+  assert.deepEqual(shown, { B2B: 11, ISIC: 10, Gold: 9, Silver: 6, Bronze: 3 });
 });
 
 test("a hidden Gold tier means Silver and Bronze are not requested", () => {
