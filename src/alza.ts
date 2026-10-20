@@ -8,6 +8,7 @@ export interface BenefitEntry {
   price: number;
   priceText: string;
   percent: number | null;
+  percentShown: number | null;
   wasPriceText?: string;
   note?: string;
 }
@@ -180,6 +181,10 @@ async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
   const entries: BenefitEntry[] = [];
   const percent = (amount: number): number | null =>
     base && base > amount ? ((base - amount) / base) * 100 : null;
+  const shown = (amount: number, denominator: number | null = base): number | null => {
+    const exact = denominator && denominator > amount ? ((denominator - amount) / denominator) * 100 : null;
+    return exact === null ? null : Math.floor(exact + 50 / denominator! + 1e-9);
+  };
 
   if (basic?.compare && base && basic.compare > base + 0.004) {
     entries.push({
@@ -188,6 +193,7 @@ async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
       price: base,
       priceText: fmtCzk2(base),
       percent: ((basic.compare - base) / basic.compare) * 100,
+      percentShown: shown(base, basic.compare),
       wasPriceText: fmtCzk2(basic.compare),
     });
   }
@@ -212,7 +218,10 @@ async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
       kind = "promo";
       label = pr.name || "Akční cena";
     }
-    entries.push({ kind, label, price: pr.amount, priceText: fmtCzk2(pr.amount), percent: percent(pr.amount) });
+    const fromCode = kind === "coupon" ? Number(/(d{1,2})$/.exec(pr.coupon ?? "")?.[1]) : NaN;
+    const calculated = shown(pr.amount);
+    const percentShown = Number.isFinite(fromCode) && calculated !== null && Math.abs(fromCode - calculated) <= 1 ? fromCode : calculated;
+    entries.push({ kind, label, price: pr.amount, priceText: fmtCzk2(pr.amount), percent: percent(pr.amount), percentShown });
   }
 
   interface ClubRow {
@@ -251,6 +260,7 @@ async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
       price: r.best,
       priceText: fmtCzk2(r.best),
       percent: percent(r.best),
+      percentShown: shown(r.best),
       ...(r.promo ? { wasPriceText: fmtCzk2(r.listPrice), note: promoTag(r.promo) } : {}),
     });
   }

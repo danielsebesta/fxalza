@@ -160,17 +160,13 @@ function outbound(url: string, carried: string): string {
   return url + (url.includes("?") ? "&" : "?") + carried;
 }
 
-function fmtPct(value: number): string {
-  const v = Math.round(value * 10) / 10;
-  return `−${new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 1 }).format(v)} %`;
-}
-
 function mdEsc(s: string): string {
   return s.replace(/([\\*_[\]~`|])/g, "\\$1");
 }
 
 function benefitLine(e: BenefitEntry, custom = false): string {
-  const pct = e.percent !== null && e.percent >= 0.1 ? ` (${fmtPct(e.percent)})` : "";
+  const shownPercent = e.percentShown ?? (e.percent === null ? null : Math.round(e.percent));
+  const pct = shownPercent !== null && shownPercent >= 1 ? ` (−${shownPercent} %)` : "";
   const was = e.wasPriceText ? `${e.wasPriceText} → ` : "";
   const name = e.note ? `${e.label} + ${e.note}` : e.label;
   if (!custom) return `${benefitEmoji(e, false)} ${name} ${was}${e.priceText}${pct}`;
