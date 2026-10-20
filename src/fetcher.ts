@@ -169,6 +169,8 @@ const providers: Provider[] = [
 ];
 
 const downUntil = new Map<string, number>();
+const failStreak = new Map<string, number>();
+const SIDECAR_STREAK = Number(process.env.SIDECAR_FAIL_STREAK ?? 3);
 
 function usable(status: number, body: string): boolean {
   if (status === 401 || status === 402 || status === 403 || status === 429 || status >= 500) return false;
@@ -202,6 +204,7 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
       const r = await p.run(url, opts, t);
       if (usable(r.status, r.body)) {
         console.log(`[fetch] ${p.name} ${r.status} ${Date.now() - started}ms ${new URL(url).pathname}${new URL(url).search}`);
+        failStreak.set(p.name, 0);
         return { ...r, via: p.name };
       }
       last = { ...r, via: p.name };
@@ -210,7 +213,11 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
       if (e instanceof OverloadedError) throw e;
       errors.push(`${p.name}: ${e instanceof Error ? e.message : e}`);
     }
-    downUntil.set(p.name, Date.now() + (p.name === "sidecar" ? SIDECAR_COOLDOWN_MS : COOLDOWN_MS));
+    const streak = (failStreak.get(p.name) ?? 0) + 1;
+    failStreak.set(p.name, streak);
+    if (p.name !== "sidecar" || streak >= SIDECAR_STREAK) {
+      downUntil.set(p.name, Date.now() + (p.name === "sidecar" ? SIDECAR_COOLDOWN_MS : COOLDOWN_MS));
+    }
     console.warn(`[fetch] ${p.name} failed for ${url} (${errors[errors.length - 1]}), trying next`);
   }
 
