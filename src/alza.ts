@@ -20,6 +20,7 @@ export interface ProductData {
   priceText: string | null;
   availability: string;
   availabilityText: string;
+  condition?: string;
   rating: number | null;
   ratingCount: number | null;
   brand: string | null;
@@ -330,6 +331,16 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
   return { entries: entries.slice(0, 8), complete: byTier.size === TIERS.length };
 }
 
+// JSON-LD itemCondition says whether it is second hand, the grade is only in the stock label.
+export function conditionText(itemCondition: unknown, html: string): string | null {
+  const kind = String(itemCondition ?? "").split("/").pop();
+  if (kind === "RefurbishedCondition") return "Repasované";
+  if (kind === "DamagedCondition") return "Poškozené";
+  if (kind !== "UsedCondition") return null;
+  const grade = /class="stcStock[^"]*"[^>]*title="s*(Rozbaleno|Zánovní|Použité)/.exec(html)?.[1];
+  return grade ?? "Použité";
+}
+
 export class UpstreamError extends Error {
   status: number;
 
@@ -517,6 +528,7 @@ export async function fetchProduct(
     priceText: price === null ? null : `${fmtCzk(price)} Kč`,
     availability,
     availabilityText: AVAILABILITY_CS[availability] ?? "Neznámá dostupnost",
+    ...(conditionText(offers?.itemCondition, html) ? { condition: conditionText(offers?.itemCondition, html)! } : {}),
     rating,
     ratingCount,
     brand: p.brand?.name ? String(p.brand.name) : null,

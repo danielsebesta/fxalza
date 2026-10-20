@@ -28,3 +28,14 @@ test("a hidden Gold tier means no copied Silver or Bronze", () => {
   assert.equal(expanded.has("Silver"), false);
   assert.equal(expanded.has("Bronze"), false);
 });
+
+test("second hand condition comes from JSON-LD and the grade from the stock label", async () => {
+  const { conditionText } = await import("../src/alza.ts");
+  const label = (t: string) => `<span class="stcStock avlVal avl2 none" title="${t}">${t}</span>`;
+  assert.equal(conditionText("https://schema.org/UsedCondition", label("Rozbaleno - skladem 1 ks")), "Rozbaleno");
+  assert.equal(conditionText("https://schema.org/UsedCondition", label("Zánovní - skladem 3 ks")), "Zánovní");
+  assert.equal(conditionText("https://schema.org/UsedCondition", label("Použité ")), "Použité");
+  assert.equal(conditionText("https://schema.org/UsedCondition", "<html></html>"), "Použité");
+  assert.equal(conditionText("https://schema.org/NewCondition", label("Skladem > 5 ks")), null);
+  assert.equal(conditionText(undefined, label("Rozbaleno - skladem 1 ks")), null);
+});

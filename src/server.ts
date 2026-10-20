@@ -200,9 +200,14 @@ function benefitLine(e: BenefitEntry, custom = false): string {
   return `${benefitEmoji(e, true)} ${label} ${was}**${e.priceText}**${pct}`;
 }
 
+function stateText(p: ProductData): string {
+  if (!p.condition) return p.availabilityText;
+  return `${p.condition}, ${p.availabilityText.charAt(0).toLowerCase()}${p.availabilityText.slice(1)}`;
+}
+
 function componentEmbedJson(p: ProductData, canonical: string, img: string | null, carried: string): string | null {
   const titleUrl = carried ? outbound(canonical, carried) : canonical;
-  const titleLine = `### **[${mdEsc(p.name)}](${titleUrl})** (${p.availabilityText})`;
+  const titleLine = `### **[${mdEsc(p.name)}](${titleUrl})** (${stateText(p)})`;
   const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale");
   const priceLine =
     p.priceText && !hasSale ? `${emojiMd("alza_price", "🏷️")} Cena **${p.priceText}**` : null;
@@ -275,7 +280,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
   const offers = (p?.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
   const cheapest = offers.reduce<BenefitEntry | null>((best, b) => (best === null || b.price < best.price ? b : best), null);
   const titlePrice = p ? (cheapest && (p.price === null || cheapest.price < p.price) ? cheapest.priceText : p.priceText) : null;
-  const title = p ? `${shortName(p.name)}${titlePrice ? ` | ${titlePrice}` : ""} (${p.availabilityText})` : fallbackTitle;
+  const title = p ? `${shortName(p.name)}${titlePrice ? ` | ${titlePrice}` : ""} (${stateText(p)})` : fallbackTitle;
 
   const DESC_MAX_BYTES = 330;
   const bytes = (t: string): number => Buffer.byteLength(t, "utf8");
