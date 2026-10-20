@@ -294,14 +294,18 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
     });
   }
 
-  for (const [source, into] of [["ISIC", "Silver"], ["B2B", "Bronze"]] as const) {
-    const s = rows.find((r) => r.names.includes(source));
-    const d = rows.find((r) => r.names.includes(into));
-    if (s && d && s !== d && Math.abs(s.listPrice - d.listPrice) < 0.005 && Math.abs(s.best - d.best) < 0.005) {
-      d.names = d.names.concat(s.names.filter((n) => !d.names.includes(n)));
-      rows.splice(rows.indexOf(s), 1);
+  // tiers that end up with the very same price share one line, in the order Gold, Silver, ISIC, Bronze, B2B
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = rows.length - 1; j > i; j--) {
+      const x = rows[i]!, y = rows[j]!;
+      if (Math.abs(x.listPrice - y.listPrice) < 0.005 && Math.abs(x.best - y.best) < 0.005) {
+        x.names = x.names.concat(y.names);
+        rows.splice(j, 1);
+      }
     }
   }
+  const CLUB_ORDER = ["Gold", "Silver", "ISIC", "Bronze", "B2B"];
+  for (const r of rows) r.names.sort((p, q) => CLUB_ORDER.indexOf(p) - CLUB_ORDER.indexOf(q));
 
   for (const r of rows) {
     entries.push({

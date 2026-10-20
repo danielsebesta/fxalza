@@ -51,3 +51,14 @@ test("second hand condition comes from JSON-LD and the grade from the stock labe
   assert.equal(conditionText("https://schema.org/NewCondition", label("Skladem > 5 ks")), null);
   assert.equal(conditionText(undefined, label("Rozbaleno - skladem 1 ks")), null);
 });
+
+test("tiers with the very same price share one line in a fixed order, whichever tiers they are", () => {
+  const price = (amount: number) => ({ amount, promo: false, priceType: null, name: "", coupon: "" });
+  const tier = (name: string, amount: number): TierResult => ({ tier: name, hidden: false, selected: price(amount), main: price(amount), promos: [] });
+  const labels = (entries: Record<string, number>): string[] =>
+    buildBenefits(new Map([["Basic", tier("Basic", 1000)], ...Object.entries(entries).map(([n, a]) => [n, tier(n, a)] as [string, TierResult])])).entries.map((e) => e.label);
+  assert.deepEqual(labels({ Gold: 900, Silver: 950, ISIC: 950, Bronze: 980, B2B: 980 }), ["Gold", "Silver/ISIC", "Bronze/B2B"]);
+  assert.deepEqual(labels({ Gold: 950, Silver: 950, ISIC: 950, Bronze: 980, B2B: 900 }), ["B2B", "Gold/Silver/ISIC", "Bronze"]);
+  assert.deepEqual(labels({ B2B: 970, Bronze: 970, Silver: 970, Gold: 970, ISIC: 970 }), ["Gold/Silver/ISIC/Bronze/B2B"]);
+  assert.deepEqual(labels({ Silver: 960, Bronze: 960 }), ["Silver/Bronze"]);
+});
