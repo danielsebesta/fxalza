@@ -18,7 +18,7 @@ const mem = new Map<string, Entry>();
 
 try {
   const raw = JSON.parse(fs.readFileSync(FILE, "utf8")) as Record<string, Entry>;
-  for (const [k, v] of Object.entries(raw)) mem.set(k, v);
+  for (const [k, v] of Object.entries(raw)) if (v.data.price !== 0) mem.set(k, v);
   console.log(`[cache] loaded ${mem.size} entries from ${FILE}`);
 } catch {
 }

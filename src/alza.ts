@@ -39,6 +39,7 @@ const AVAILABILITY_CS: Record<string, string> = {
   InStoreOnly: "Jen na prodejně",
   SoldOut: "Vyprodáno",
   OnlineOnly: "Jen online",
+  Discontinued: "Prodej skončil",
 };
 
 const BENEFITS_ENABLED = process.env.BENEFITS !== "0";
@@ -370,7 +371,7 @@ export async function fetchProduct(
   let price: number | null = null;
   if (offers && offers.price !== undefined && offers.price !== null) {
     const v = typeof offers.price === "number" ? offers.price : Number(String(offers.price).replace(",", "."));
-    if (Number.isFinite(v)) price = v;
+    if (Number.isFinite(v) && v > 0) price = v;
   }
 
   let rating: number | null = null;
@@ -425,7 +426,7 @@ export async function fetchProduct(
     price,
     priceText: price === null ? null : `${fmtCzk(price)} Kč`,
     availability,
-    availabilityText: AVAILABILITY_CS[availability] ?? "Dostupnost na Alze",
+    availabilityText: AVAILABILITY_CS[availability] ?? "Neznámá dostupnost",
     rating,
     ratingCount,
     brand: p.brand?.name ? String(p.brand.name) : null,
