@@ -45,6 +45,8 @@ export function benefitEmoji(e: BenefitEntry, custom: boolean): string {
   const [name, fallback] = KIND[e.kind];
   if (!custom) return fallback;
   if (e.kind === "tier") {
+    const merged = emojiRef(`alza_${e.label.toLowerCase().replaceAll("/", "_")}`);
+    if (merged) return `<:${merged.name}:${merged.id}>`;
     return emojiMd(TIER[e.label.split("/")[0]!.toLowerCase()] ?? name, fallback);
   }
   return emojiMd(name, fallback);
