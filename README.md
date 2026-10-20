@@ -8,7 +8,7 @@ Open source nástroj, který v Discordu ukáže náhled odkazů z Alzy: název, 
 Stačí v odkazu přepsat `alza.cz` na `fxalza.cz`:
 
 ```
-https://www.alza.cz/<produkt>-d12345.htm  →  https://fxalza.cz/<produkt>-d12345.htm
+www.alza.cz/<produkt>-d12345.htm  →  fxalza.cz/<produkt>-d12345.htm
 ```
 
 Kdo odkaz otevře v prohlížeči, skončí rovnou na Alze.
