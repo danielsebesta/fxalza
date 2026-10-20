@@ -247,6 +247,7 @@ export function landingHtml(host: string, disclaimer: string): string {
     h1{font-size:clamp(2.6rem,10vw,3.8rem);line-height:1.05;letter-spacing:-.035em;font-weight:700;color:var(--head);margin:0 0 1rem}
     .logo{display:block;width:5rem;height:5rem;margin:0 auto .5rem}
     h1 span{color:#0f6fc5}
+    .fx{color:#0f6fc5;font-weight:700}
     .sub{font-size:1.25rem;line-height:1.45;color:var(--muted);margin:0 auto;max-width:28rem}
     h2{font-size:1.5rem;line-height:1.25;letter-spacing:-.012em;font-weight:700;color:var(--head);margin:3rem 0 .5rem}
     figure{margin:2.2rem -.5rem}
@@ -279,7 +280,8 @@ export function landingHtml(host: string, disclaimer: string): string {
   <p class="sub">Náhledy odkazů z Alzy na Discordu</p>
 </header>
 
-<p>Pošleš odkaz z Alzy a na Discordu zůstane holý text. V odkazu změň <code>alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
+<p>Pošleš odkaz z Alzy a na Discordu z něj zbyde jen odkaz. Žádná fotka, žádný popisek, žádná cena, nic.</p>
+<p>Přidej před <code>alza.cz</code> písmena <span class="fx">fx</span> (<code>${h}</code>) a Discord z něj udělá kartu s fotkou, cenou, slevami a kupóny.</p>
 
 <figure><div id="demo-wrap" class="demo-wrap"><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu na Discordu" loading="lazy" scrolling="no"></iframe></div></figure>
 
