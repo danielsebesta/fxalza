@@ -1,6 +1,6 @@
 # fxalza
 
-Pěkné náhledy odkazů na **Alza.cz** v Discordu: název, cena, sleva, kupóny, cashback a klubové ceny.
+Open source nástroj, který v Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.
 
 Stačí v odkazu přepsat `alza.cz` na `fxalza.cz`:
 

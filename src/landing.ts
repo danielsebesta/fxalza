@@ -121,7 +121,7 @@ ${DEMO_CSS}
 `;
 
 const DESCRIPTION =
-  "Open source nástroj, který v Discordu vykreslí pěkný náhled odkazů na Alza.cz: cenu, slevy, kupóny, cashback a klubové ceny Gold, Silver a Bronze.";
+  "Open source nástroj, který v Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.";
 
 export const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -181,7 +181,7 @@ export function landingHtml(host: string, disclaimer: string): string {
   <meta property="og:locale" content="cs_CZ">
   <meta property="og:url" content="${PUBLIC_URL}/">
   <meta property="og:title" content="fxalza – náhledy odkazů z Alzy v Discordu">
-  <meta property="og:description" content="Změň www.alza.cz na ${h} a Discord ukáže cenu, slevy, kupóny a klubové ceny.">
+  <meta property="og:description" content="${esc(DESCRIPTION)}">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="fxalza – náhledy odkazů z Alzy v Discordu">
   <meta name="twitter:description" content="${esc(DESCRIPTION)}">
@@ -226,7 +226,7 @@ export function landingHtml(host: string, disclaimer: string): string {
   <p class="sub">Náhledy odkazů z Alzy v Discordu</p>
 </header>
 
-<p>Discord neumí ukázat odkazy z Alzy, protože je Alza blokuje. Pošleš odkaz a v chatu zůstane holý text. Tohle to opravuje: v odkazu změníš <code>www.alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
+<p>Pošleš odkaz z Alzy a v Discordu zůstane holý text. V odkazu změň <code>www.alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
 
 <figure><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu v Discordu" loading="lazy" scrolling="no"></iframe></figure>
 
