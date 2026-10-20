@@ -22,7 +22,6 @@ const UA = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)";
 const PRODUCTS = [
   { id: "13067221", label: "Epson EcoTank L4360" },
   { id: "13450080", label: "Google Pixel 11" },
-  { id: "12878737", label: "Bosch lednice" },
   { id: "12978903", label: "Acer Predator" },
   { id: "5509713", label: "AlzaPower kabel" },
 ];
