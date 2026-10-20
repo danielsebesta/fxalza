@@ -56,7 +56,13 @@ const SCRIPT = `(function () {
     frame.style.height = h + "px";
     wrap.style.height = Math.ceil(h * scale) + "px";
   }
+  function stamp() {
+    var now = new Date();
+    var text = "dnes v " + ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2);
+    frame.contentDocument.querySelectorAll(".discord-message-timestamp").forEach(function (el) { el.textContent = text; });
+  }
   frame.addEventListener("load", function () {
+    stamp();
     fit();
     new ResizeObserver(fit).observe(frame.contentDocument.body);
   });
