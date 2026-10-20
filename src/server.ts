@@ -17,7 +17,7 @@ const APEX = new URL(PUBLIC_URL).hostname.toLowerCase();
 const SERVED_SUBDOMAINS = new Set(["www", "m"]);
 
 const UTM = "utm_source=fxalza&utm_medium=discord";
-const DISCLAIMER = "Neoficiální nástroj, s Alza.cz nijak nesouvisí.";
+const DISCLAIMER = "Neoficiální nástroj, s Alza.cz a.s. nijak nesouvisí. „Alza“ a „Alza.cz“ jsou ochranné známky společnosti Alza.cz a.s.";
 
 interface Parsed {
   id: string;
