@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fetchProduct, slugTitle, stopSidecar, type BenefitEntry, type ProductData } from "./alza.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
-import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, HOW_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
+import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -365,10 +365,6 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === "/robots.txt") {
       sendStatic(req, res, ROBOTS_TXT, "text/plain; charset=utf-8", { "x-robots-tag": "all" }, 3600);
-      return;
-    }
-    if (u.pathname === "/how.svg") {
-      sendStatic(req, res, HOW_SVG, "image/svg+xml", { "x-robots-tag": "all" }, 3600);
       return;
     }
     if (u.pathname === "/demo") {
