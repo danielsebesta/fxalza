@@ -19,6 +19,7 @@ function read(rel: string, enc: BufferEncoding = "utf8"): string {
 }
 
 const DEMO = read("./landing-demo.html");
+export const HOW_SVG = read("../assets/how.svg");
 
 export const FAVICON_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 136 136" shape-rendering="crispEdges"><g fill="#0f6fc5"><path d="M97.46 64.08V37.3H84.04V23.9H70.65v13.4H57.26V23.9H43.87v13.4H30.48v26.78H17.09v13.39h13.39v13.4h13.39v13.38h13.39V90.87h13.39v13.38h13.39V90.87h13.42v-13.4h13.37V64.08H97.46zm-40.21 0H43.86V50.69h13.39v13.39zm26.78 0H70.64V50.69h13.39v13.39z"/><path d="M30.47 104.24h13.39v13.39H30.47z"/><path d="M84.04 104.24h13.39v13.39H84.04z"/><path d="M30.48 10.51h13.39V23.9H30.48z"/><path d="M84.04 10.51h13.39V23.9H84.04z"/><path d="M110.82 37.29h13.4v26.8h-13.4z"/><path d="M3.7 37.28h13.4v26.8H3.7z"/></g></svg>';
@@ -198,6 +199,7 @@ export function landingHtml(host: string, disclaimer: string): string {
     h2{font-size:1.5rem;line-height:1.25;letter-spacing:-.012em;font-weight:700;color:var(--head);margin:3rem 0 .5rem}
     figure{margin:2.2rem -.5rem}
     @media (min-width:46rem){figure{margin-inline:-3rem}}
+    .how{display:block;width:100%;height:auto}
     .demo-frame{display:block;width:100%;height:34rem;border:0;overflow:hidden}
     .small{font:.82rem var(--sans);color:var(--muted)}
     .try{margin:1.6rem 0;padding:1rem 0;border-block:1px solid var(--line)}
@@ -227,6 +229,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 
 <p>Discord neumí ukázat odkazy z Alzy, protože je Alza blokuje. Pošleš odkaz a v chatu zůstane holý text. Tohle to opravuje: v odkazu změníš <code>www.alza.cz</code> na <code>${h}</code> a Discord ukáže cenu, slevy, kupóny a klubové ceny.</p>
 
+<figure><img class="how" src="/how.svg" width="720" height="408" alt="Animace: v odkazu na Alzu přibude fx před alza.cz a Discord ukáže náhled produktu"></figure>
 <figure><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu v Discordu" loading="lazy" scrolling="no"></iframe></figure>
 
 <h2>Jak na to</h2>
