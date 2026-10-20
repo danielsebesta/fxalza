@@ -1,6 +1,8 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { fetchProduct, slugTitle, stopSidecar, type BenefitEntry, type ProductData } from "./alza.ts";
+import { fetchProduct, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
+import { parseProductPath, type Parsed } from "./parse.ts";
+import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml, problemHtml } from "./landing.ts";
@@ -18,20 +20,6 @@ const SERVED_SUBDOMAINS = new Set(["www", "m"]);
 
 const UTM = "utm_source=fxalza&utm_medium=discord";
 const DISCLAIMER = "Neoficiální nástroj, s Alza.cz a.s. nijak nesouvisí.\n„Alza“ a „Alza.cz“ jsou ochranné známky společnosti Alza.cz a.s.";
-
-interface Parsed {
-  id: string;
-  path: string;
-}
-
-function parseProductPath(pathname: string): Parsed | null {
-  const slug = pathname.match(/^(\/[A-Za-z0-9._~%/-]*?-d(\d{1,12}))(?:\.[A-Za-z0-9]+)?\/?$/i);
-  if (slug) return { id: slug[2]!, path: `${slug[1]}.htm` };
-  const bare = pathname.match(/^\/d?(\d{1,12})\/?$/i);
-  if (bare) return { id: bare[1]!, path: `/-d${bare[1]}.htm` };
-  const any = pathname.match(/-d(\d{1,12})(?!\d)/i);
-  return any ? { id: any[1]!, path: `/-d${any[1]}.htm` } : null;
-}
 
 const ALZA_HOST = /^\/(?:https?:\/+)?((?:[a-z0-9-]+\.)*alza\.(cz|sk|de|at|ch|hu|pl|co\.uk))(\/.*)?$/i;
 
@@ -66,8 +54,13 @@ function refresh(id: string, path: string): Promise<ProductData> {
       if (current) putCached(id, { ...current, benefits });
     })
       .then((d) => {
+        negative.delete(id);
         putCached(id, d);
         return d;
+      })
+      .catch((e) => {
+        remember(id, e);
+        throw e;
       })
       .finally(() => inflight.delete(id));
     inflight.set(id, p);
@@ -75,16 +68,45 @@ function refresh(id: string, path: string): Promise<ProductData> {
   return p;
 }
 
+const MISSING_TTL_MS = Number(process.env.MISSING_TTL_MS ?? 10 * 60_000);
+const FAILED_TTL_MS = Number(process.env.FAILED_TTL_MS ?? 30_000);
+const NEGATIVE_MAX = 2000;
+const negative = new Map<string, { until: number; missing: boolean }>();
+
+function remember(id: string, e: unknown): void {
+  const missing = e instanceof UpstreamError && (e.status === 404 || e.status === 410);
+  if (e instanceof OverloadedError) return;
+  negative.delete(id);
+  negative.set(id, { until: Date.now() + (missing ? MISSING_TTL_MS : FAILED_TTL_MS), missing });
+  while (negative.size > NEGATIVE_MAX) negative.delete(negative.keys().next().value!);
+}
+
+function recalled(id: string): { missing: boolean } | null {
+  const n = negative.get(id);
+  if (!n) return null;
+  if (n.until <= Date.now()) {
+    negative.delete(id);
+    return null;
+  }
+  return n;
+}
+
 interface ProductResult {
   data: ProductData | null;
   stale: boolean;
   limited?: boolean;
+  missing?: boolean;
 }
 
 async function getProduct(id: string, path: string, who: Requester): Promise<ProductResult> {
   const hit = peekCached(id);
   console.log(`[product] ${id} cache ${hit?.state ?? "miss"}`);
   if (hit?.state === "fresh") return { data: hit.data, stale: false };
+  const bad = hit?.state === "stale" ? null : recalled(id);
+  if (bad) {
+    const old = getCached(id, true);
+    return { data: old, stale: old !== null, missing: bad.missing && old === null };
+  }
   const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, who.discord);
   if (hit?.state === "stale") {
     if (mayFetch()) refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));
@@ -113,7 +135,8 @@ async function getProduct(id: string, path: string, who: Requester): Promise<Pro
   } catch (e) {
     console.error(`[fetch] ${id} failed: ${e instanceof Error ? e.message : e}`);
     const old = getCached(id, true);
-    return { data: old, stale: old !== null };
+    const missing = e instanceof UpstreamError && (e.status === 404 || e.status === 410);
+    return { data: old, stale: old !== null, missing: missing && old === null };
   }
 }
 
@@ -125,8 +148,9 @@ function sendProblem(
   title: string,
   message: string,
   extra: Record<string, string> = {},
+  showToBots = true,
 ): void {
-  res.writeHead(isBot ? 200 : status, {
+  res.writeHead(isBot && showToBots ? 200 : status, {
     "content-type": "text/html; charset=utf-8",
     "content-security-policy": LANDING_CSP,
     "cache-control": "no-store",
@@ -240,7 +264,7 @@ function shortName(name: string, max = 70): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
 }
 
-function embedHtml(p: ProductData | null, path: string, stale: boolean, carried = ""): string {
+function embedHtml(p: ProductData | null, path: string, stale: boolean, carried = "", missing = false): string {
   const slugged = slugTitle(path);
   const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
   const fallbackTitle = slugged === "Produkt" && productId ? `Produkt z Alzy (${productId})` : slugged;
@@ -259,7 +283,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     for (const b of offers) parts.push(benefitLine(b));
     if (stale) parts.push("data mohou být starší");
   } else {
-    parts.push("Produkt se nepodařilo načíst, zkus odkaz otevřít přímo na Alze.");
+    parts.push(missing ? "Tenhle produkt na Alze už nenajdeme, odkaz je nejspíš neplatný." : "Produkt se nepodařilo načíst, zkus odkaz otevřít přímo na Alze.");
   }
   let desc = parts.join(" • ");
   if (p?.description) {
@@ -517,7 +541,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (u.searchParams.get("format") === "json") {
-      const { data, stale, limited } = await getProduct(parsed.id, parsed.path, who);
+      const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who);
       if (limited) {
         res.writeHead(429, { "content-type": "application/json; charset=utf-8", "retry-after": "60", "cache-control": "no-store", ...CORS_HEADERS });
         res.end(JSON.stringify({ error: "rate_limited", retryAfter: 60 }));
@@ -528,9 +552,9 @@ const server = http.createServer(async (req, res) => {
         null,
         1,
       );
-      res.writeHead(200, {
+      res.writeHead(data ? 200 : missing ? 404 : 503, {
         "content-type": "application/json; charset=utf-8",
-        "cache-control": "public, max-age=60, stale-while-revalidate=300",
+        "cache-control": data ? "public, max-age=60, stale-while-revalidate=300" : "no-store",
         ...CORS_HEADERS,
         "access-control-expose-headers": "content-length",
       });
@@ -546,12 +570,16 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const { data, stale, limited } = await getProduct(parsed.id, parsed.path, who);
+    const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who);
     if (limited) {
-      sendProblem(req, res, isBot, 429, "Moc požadavků najednou", "Náhled se teď načítá pro hodně odkazů. Zkus to prosím za chvíli.", { "retry-after": "60" });
+      sendProblem(req, res, isBot, 429, "Moc požadavků najednou", "Náhled se teď načítá pro hodně odkazů. Zkus to prosím za chvíli.", { "retry-after": "60" }, false);
       return;
     }
-    const html = embedHtml(data, parsed.path, stale, carriedQuery(u.searchParams));
+    if (!data && !missing) {
+      sendProblem(req, res, isBot, 503, "Náhled se nepodařilo načíst", "Alza teď neodpovídá nebo je moc požadavků. Zkus to prosím za chvíli.", { "retry-after": "30" }, false);
+      return;
+    }
+    const html = embedHtml(data, parsed.path, stale, carriedQuery(u.searchParams), missing);
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
@@ -569,16 +597,11 @@ const server = http.createServer(async (req, res) => {
     } catch {
       fallback = null;
     }
-    if (!res.headersSent && isBot && fallback) {
-      const html = embedHtml(null, fallback.path, false, fallbackQuery);
-      res.writeHead(200, {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-        vary: "Accept-Encoding, User-Agent",
-      });
-      res.end(html);
+    if (!res.headersSent && !isBot && fallback) {
+      res.writeHead(302, { Location: outbound(`https://www.alza.cz${fallback.path}`, fallbackQuery), "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+      res.end();
     } else if (!res.headersSent) {
-      sendProblem(req, res, isBot, 500, "Něco se pokazilo", "Náhled se teď nepodařilo vytvořit. Zkus to prosím za chvíli.");
+      sendProblem(req, res, isBot, 503, "Něco se pokazilo", "Náhled se teď nepodařilo vytvořit. Zkus to prosím za chvíli.", { "retry-after": "30" }, false);
     } else {
       res.end();
     }
@@ -586,6 +609,21 @@ const server = http.createServer(async (req, res) => {
     const ms = Date.now() - started;
     console.log(`${new Date().toISOString()} ${isBot ? "bot " : "human"} ${res.statusCode} ${ms}ms ${logged} (${ua.slice(0, 40)})`);
   }
+});
+
+server.headersTimeout = 15_000;
+server.requestTimeout = 20_000;
+server.keepAliveTimeout = 65_000;
+server.maxConnections = Number(process.env.MAX_CONNECTIONS ?? 2000);
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] unhandled rejection:", reason);
+});
+process.on("uncaughtException", (e) => {
+  console.error("[process] uncaught exception, exiting for a restart:", e);
+  flushCache();
+  stopSidecar();
+  process.exit(1);
 });
 
 server.listen(PORT, HOST, () => {

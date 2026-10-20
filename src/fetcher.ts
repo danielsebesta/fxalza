@@ -1,4 +1,4 @@
-import { Sidecar } from "./sidecar.ts";
+import { OverloadedError, Sidecar } from "./sidecar.ts";
 
 export interface FetchResult {
   status: number;
@@ -21,6 +21,18 @@ interface Provider {
 const COOLDOWN_MS = Number(process.env.FETCH_COOLDOWN_MS ?? 60_000);
 const SIDECAR_COOLDOWN_MS = Number(process.env.SIDECAR_COOLDOWN_MS ?? 10_000);
 const PAID_MIN_TIMEOUT_MS = 20_000;
+const PAID_DAILY_MAX = Number(process.env.PAID_DAILY_MAX ?? 300);
+let paidDay = "";
+let paidUsed = 0;
+
+function paidBudgetLeft(): boolean {
+  const day = new Date().toISOString().slice(0, 10);
+  if (day !== paidDay) {
+    paidDay = day;
+    paidUsed = 0;
+  }
+  return paidUsed < PAID_DAILY_MAX;
+}
 const sidecar = new Sidecar();
 
 class KeyPool {
@@ -177,6 +189,13 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
   for (const p of order) {
     if (!p.enabled()) continue;
     if ((downUntil.get(p.name) ?? 0) > Date.now()) continue;
+    if (p.name !== "sidecar") {
+      if (!paidBudgetLeft()) {
+        errors.push(`${p.name}: daily budget of ${PAID_DAILY_MAX} paid requests used up`);
+        continue;
+      }
+      paidUsed++;
+    }
     const t = p.name === "sidecar" ? timeoutMs : Math.max(timeoutMs, PAID_MIN_TIMEOUT_MS);
     const started = Date.now();
     try {
@@ -188,6 +207,7 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
       last = { ...r, via: p.name };
       errors.push(`${p.name}: HTTP ${r.status}`);
     } catch (e) {
+      if (e instanceof OverloadedError) throw e;
       errors.push(`${p.name}: ${e instanceof Error ? e.message : e}`);
     }
     downUntil.set(p.name, Date.now() + (p.name === "sidecar" ? SIDECAR_COOLDOWN_MS : COOLDOWN_MS));

@@ -7,6 +7,9 @@ import type { Readable, Writable } from "node:stream";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "../sidecar/cf-transport.py");
 
+const WORKERS = Math.max(1, Number(process.env.SIDECAR_WORKERS ?? 3));
+const MAX_QUEUE = Math.max(1, Number(process.env.SIDECAR_MAX_QUEUE ?? 40));
+
 type SidecarProc = ChildProcessByStdio<Writable, Readable, null>;
 
 export interface SidecarResponse {
@@ -23,17 +26,18 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export class Sidecar {
-  private proc: SidecarProc | null = null;
-  private nextId = 1;
-  private pending = new Map<number, Pending>();
+export class OverloadedError extends Error {
+  constructor() {
+    super("sidecar overloaded");
+  }
+}
+
+class Worker {
+  proc: SidecarProc | null = null;
+  pending = new Map<number, Pending>();
   private lastSpawn = 0;
 
-  private cmd(): string[] {
-    return ["uv", "run", "--with", "curl_cffi", "python", "-u", SCRIPT];
-  }
-
-  private ensure(): SidecarProc {
+  ensure(): SidecarProc {
     if (this.proc && !this.proc.killed && this.proc.exitCode === null) return this.proc;
 
     if (Date.now() - this.lastSpawn < 5000) {
@@ -41,8 +45,7 @@ export class Sidecar {
     }
     this.lastSpawn = Date.now();
 
-    const [bin, ...args] = this.cmd();
-    const proc = spawn(bin, args, { stdio: ["pipe", "pipe", "inherit"] });
+    const proc = spawn("uv", ["run", "--with", "curl_cffi", "python", "-u", SCRIPT], { stdio: ["pipe", "pipe", "inherit"] });
     this.proc = proc;
 
     const rl = createInterface({ input: proc.stdout });
@@ -70,25 +73,48 @@ export class Sidecar {
     };
     proc.on("exit", (code) => failAll(`sidecar exited (code=${code})`));
     proc.on("error", (e) => failAll(`sidecar failed to start (${e.message})`));
+    proc.stdin.on("error", () => {});
 
     return proc;
+  }
+
+  stop(): void {
+    this.proc?.kill();
+    this.proc = null;
+  }
+}
+
+export class Sidecar {
+  private workers = Array.from({ length: WORKERS }, () => new Worker());
+  private nextId = 1;
+
+  private pick(): Worker {
+    let best = this.workers[0]!;
+    let total = 0;
+    for (const w of this.workers) {
+      total += w.pending.size;
+      if (w.pending.size < best.pending.size) best = w;
+    }
+    if (total >= MAX_QUEUE) throw new OverloadedError();
+    return best;
   }
 
   request(
     url: string,
     opts: { method?: string; headers?: Record<string, string>; timeoutMs?: number } = {},
   ): Promise<SidecarResponse> {
-    const proc = this.ensure();
+    const worker = this.pick();
+    const proc = worker.ensure();
     const id = this.nextId++;
     const timeoutMs = opts.timeoutMs ?? 25000;
 
     return new Promise<SidecarResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id);
+        worker.pending.delete(id);
         reject(new Error(`sidecar request #${id} timed out`));
       }, timeoutMs + 5000);
 
-      this.pending.set(id, { resolve, reject, timer });
+      worker.pending.set(id, { resolve, reject, timer });
       proc.stdin.write(
         JSON.stringify({ id, url, method: opts.method ?? "GET", headers: opts.headers ?? {}, timeoutMs }) + "\n",
       );
@@ -96,7 +122,6 @@ export class Sidecar {
   }
 
   stop(): void {
-    this.proc?.kill();
-    this.proc = null;
+    for (const w of this.workers) w.stop();
   }
 }

@@ -2,13 +2,14 @@ import { createHmac, randomBytes } from "node:crypto";
 import type http from "node:http";
 import { BlockList, isIP } from "node:net";
 
-const DISCORD_PER_MIN = Number(process.env.RATE_DISCORD_PER_MIN ?? 10);
+const DISCORD_PER_MIN = Number(process.env.RATE_DISCORD_PER_MIN ?? 30);
 const OTHER_PER_10MIN = Number(process.env.RATE_OTHER_PER_10MIN ?? 3);
-const GLOBAL_PER_MIN = Number(process.env.RATE_GLOBAL_PER_MIN ?? 20);
+const GLOBAL_PER_MIN = Number(process.env.RATE_GLOBAL_PER_MIN ?? 45);
+const OTHER_GLOBAL_PER_MIN = Number(process.env.RATE_OTHER_GLOBAL_PER_MIN ?? 6);
 const STORE_MAX = 10_000;
 const DISCORD_UA = /Discordbot/i;
 const DISCORD_RANGES_URL = process.env.DISCORD_IPRANGES_URL ?? "https://cdn.discordapp.com/ipranges/discord.json";
-const DISCORD_IPS_STRICT = process.env.DISCORD_IPS_STRICT === "1";
+const DISCORD_IPS_STRICT = process.env.DISCORD_IPS_STRICT !== "0";
 
 let discordRanges: BlockList | null = null;
 
@@ -45,6 +46,7 @@ function listedAsDiscord(ip: string): boolean {
 const SECRET = randomBytes(32);
 const hits = new Map<string, number[]>();
 let globalHits: number[] = [];
+let otherGlobalHits: number[] = [];
 
 setInterval(() => {
   const cutoff = Date.now() - 10 * 60_000;
@@ -94,6 +96,8 @@ export function allowFetch(id: string, discord: boolean): boolean {
   const now = Date.now();
   globalHits = globalHits.filter((t) => now - t < 60_000);
   if (globalHits.length >= GLOBAL_PER_MIN) return false;
+  otherGlobalHits = otherGlobalHits.filter((t) => now - t < 60_000);
+  if (!discord && otherGlobalHits.length >= OTHER_GLOBAL_PER_MIN) return false;
 
   const windowMs = discord ? 60_000 : 10 * 60_000;
   const max = discord ? DISCORD_PER_MIN : OTHER_PER_10MIN;
@@ -107,6 +111,7 @@ export function allowFetch(id: string, discord: boolean): boolean {
   list.push(now);
   hits.set(key, list);
   globalHits.push(now);
+  if (!discord) otherGlobalHits.push(now);
   if (hits.size > STORE_MAX) hits.delete(hits.keys().next().value!);
   return true;
 }

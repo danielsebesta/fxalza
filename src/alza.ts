@@ -278,6 +278,25 @@ async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
   return entries.slice(0, 8);
 }
 
+export class UpstreamError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function httpsUrlOn(value: string, domain: string): string | null {
+  try {
+    const u = new URL(value);
+    const host = u.hostname.toLowerCase();
+    return u.protocol === "https:" && (host === domain || host.endsWith(`.${domain}`)) ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getHtml(path: string): Promise<string> {
   const res = await fetchUrl(`https://www.alza.cz${path}`, {
     headers: {
@@ -286,7 +305,7 @@ async function getHtml(path: string): Promise<string> {
     },
     timeoutMs: 25000,
   });
-  if (res.status !== 200) throw new Error(`alza responded HTTP ${res.status} (via ${res.via})`);
+  if (res.status !== 200) throw new UpstreamError(res.status, `alza responded HTTP ${res.status} (via ${res.via})`);
   return res.body;
 }
 
@@ -406,9 +425,9 @@ export async function fetchProduct(
 
   const availability = offers?.availability ? String(offers.availability).split("/").pop()! : "unknown";
 
-  let canonicalUrl = `https://www.alza.cz${path}`;
-  if (offers?.url) canonicalUrl = String(offers.url);
-  else if (typeof p["@id"] === "string") canonicalUrl = String(p["@id"]).replace(/#.*$/, "");
+  const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
+  const canonicalUrl = (claimed && httpsUrlOn(claimed, "alza.cz")) || `https://www.alza.cz${path}`;
+  if (image && !httpsUrlOn(image, "alza.cz")) image = null;
 
   let benefits: BenefitEntry[] = [];
   let grace: ReturnType<typeof setTimeout> | undefined;

@@ -26,17 +26,35 @@ try {
 let dirty = false;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-function save(): void {
-  if (!dirty) return;
+let saving = false;
+
+function save(sync = false): void {
+  if (!dirty || (saving && !sync)) return;
   dirty = false;
-  try {
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    const tmp = `${FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(mem)));
-    fs.renameSync(tmp, FILE);
-  } catch (e) {
-    console.error("[cache] save failed:", e);
+  const json = JSON.stringify(Object.fromEntries(mem));
+  const tmp = `${FILE}.tmp`;
+  if (sync) {
+    try {
+      fs.mkdirSync(path.dirname(FILE), { recursive: true });
+      fs.writeFileSync(tmp, json);
+      fs.renameSync(tmp, FILE);
+    } catch (e) {
+      console.error("[cache] save failed:", e);
+    }
+    return;
   }
+  saving = true;
+  fs.promises
+    .mkdir(path.dirname(FILE), { recursive: true })
+    .then(() => fs.promises.writeFile(tmp, json))
+    .then(() => fs.promises.rename(tmp, FILE))
+    .catch((e) => {
+      dirty = true;
+      console.error("[cache] save failed:", e);
+    })
+    .finally(() => {
+      saving = false;
+    });
 }
 
 function scheduleSave(): void {
@@ -44,13 +62,13 @@ function scheduleSave(): void {
   saveTimer = setTimeout(() => {
     saveTimer = null;
     save();
-  }, 2000);
+  }, 5000);
 }
 
 export function flushCache(): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = null;
-  save();
+  save(true);
 }
 
 type CacheState = "fresh" | "stale" | "expired";
