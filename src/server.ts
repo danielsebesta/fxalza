@@ -222,17 +222,25 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
   return fits(lean) ? lean : null;
 }
 
+function shortName(name: string, max = 70): string {
+  if (name.length <= max) return name;
+  const cut = name.slice(0, max);
+  return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
+}
+
 function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefresh: boolean, carried = "", components = true): string {
   const fallbackTitle = slugTitle(path);
   const canonical = p?.canonicalUrl ?? `https://www.alza.cz${path}`;
 
-  const title = p ? `${p.name} (${p.availabilityText})` : fallbackTitle;
+  const offers = (p?.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
+  const cheapest = offers.reduce<BenefitEntry | null>((best, b) => (best === null || b.price < best.price ? b : best), null);
+  const titlePrice = p ? (cheapest && (p.price === null || cheapest.price < p.price) ? cheapest.priceText : p.priceText) : null;
+  const title = p ? `${shortName(p.name)}${titlePrice ? ` | ${titlePrice}` : ""} (${p.availabilityText})` : fallbackTitle;
 
   const DESC_MAX_BYTES = 330;
   const bytes = (t: string): number => Buffer.byteLength(t, "utf8");
   const parts: string[] = [];
   if (p) {
-    const offers = (p.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
     if (p.priceText && !offers.some((b) => b.kind === "sale")) parts.push(p.priceText);
     for (const b of offers) parts.push(benefitLine(b));
     if (stale) parts.push("data mohou být starší");
