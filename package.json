@@ -7,7 +7,6 @@
   "scripts": {
     "start": "node src/server.ts",
     "check": "tsc --noEmit",
-    "emoji": "uv run --with resvg-py --with pillow python scripts/make-emoji.py && node --env-file=.env scripts/upload-emoji.mjs",
     "landing-demo": "node scripts/make-landing-demo.mjs"
   },
   "engines": {
