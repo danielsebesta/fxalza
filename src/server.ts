@@ -260,6 +260,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     `<meta property="og:type" content="product">`,
     `<meta property="og:site_name" content="Alza.cz">`,
     `<meta property="og:title" content="${esc(title)}">`,
+    `<meta name="description" content="${esc(desc)}">`,
     `<meta property="og:description" content="${esc(desc)}">`,
     img ? `<meta property="og:image" content="${esc(img)}">` : "",
     img ? `<meta property="og:image:width" content="${IMG_W}">` : "",
@@ -272,6 +273,9 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : "",
     metaRefresh ? `<meta http-equiv="refresh" content="0;url=${esc(outbound(canonical, carried))}">` : "",
     `<meta name="twitter:card" content="${img ? "summary_large_image" : "summary"}">`,
+    `<meta name="twitter:title" content="${esc(title)}">`,
+    `<meta name="twitter:description" content="${esc(desc)}">`,
+    img ? `<meta name="twitter:image" content="${esc(img)}">` : "",
     `<meta name="theme-color" content="#0f6fc5">`,
   ]
     .filter(Boolean)
