@@ -278,9 +278,9 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
 
   const tags = [
     `<meta charset="utf-8">`,
-    `<title>${esc(title)} | Alza.cz</title>`,
+    `<title>${esc(title)} | ${p ? "Alza.cz" : "fxalza"}</title>`,
     `<meta property="og:type" content="product">`,
-    `<meta property="og:site_name" content="Alza.cz">`,
+    `<meta property="og:site_name" content="${p ? "Alza.cz" : "fxalza"}">`,
     `<meta property="og:title" content="${esc(title)}">`,
     `<meta name="description" content="${esc(desc)}">`,
     `<meta property="og:description" content="${esc(desc)}">`,
