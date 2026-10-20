@@ -72,6 +72,7 @@ function refresh(id: string, path: string): Promise<ProductData> {
 
 async function getProduct(id: string, path: string): Promise<{ data: ProductData | null; stale: boolean }> {
   const hit = peekCached(id);
+  console.log(`[product] ${id} cache ${hit?.state ?? "miss"}`);
   if (hit?.state === "fresh") return { data: hit.data, stale: false };
   if (hit?.state === "stale") {
     refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));

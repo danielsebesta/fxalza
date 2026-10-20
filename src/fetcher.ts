@@ -102,9 +102,13 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
     if (!p.enabled()) continue;
     if ((downUntil.get(p.name) ?? 0) > Date.now()) continue;
     const t = p.name === "sidecar" ? timeoutMs : Math.max(timeoutMs, PAID_MIN_TIMEOUT_MS);
+    const started = Date.now();
     try {
       const r = await p.run(url, opts, t);
-      if (usable(r.status, r.body)) return { ...r, via: p.name };
+      if (usable(r.status, r.body)) {
+        console.log(`[fetch] ${p.name} ${r.status} ${Date.now() - started}ms ${new URL(url).pathname}${new URL(url).search}`);
+        return { ...r, via: p.name };
+      }
       last = { ...r, via: p.name };
       errors.push(`${p.name}: HTTP ${r.status}`);
     } catch (e) {
@@ -114,6 +118,9 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
     console.warn(`[fetch] ${p.name} failed for ${url} (${errors[errors.length - 1]}), trying next`);
   }
 
-  if (last) return last;
+  if (last) {
+    console.warn(`[fetch] no usable response, returning ${last.via} HTTP ${last.status} for ${new URL(url).pathname}${new URL(url).search}`);
+    return last;
+  }
   throw new Error(`all fetch providers failed: ${errors.join("; ") || "no provider available (disabled or cooling down)"}`);
 }
