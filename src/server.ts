@@ -4,7 +4,7 @@ import { fetchProduct, slugTitle, stopSidecar, type BenefitEntry, type ProductDa
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
-import { allowFetch, clientId, isDiscord } from "./ratelimit.ts";
+import { allowFetch, identify, type Requester } from "./ratelimit.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -73,11 +73,6 @@ function refresh(id: string, path: string): Promise<ProductData> {
     inflight.set(id, p);
   }
   return p;
-}
-
-interface Requester {
-  id: string;
-  discord: boolean;
 }
 
 interface ProductResult {
@@ -388,7 +383,8 @@ const server = http.createServer(async (req, res) => {
   const started = Date.now();
   const ua = String(req.headers["user-agent"] ?? "");
   const isBot = BOT_RE.test(ua);
-  const who: Requester = { id: clientId(req), discord: isDiscord(ua) };
+  const who = identify(req, ua);
+  if (who.unlisted) console.log(`[discord] Discordbot user agent from an address outside the published ranges (${who.id})`);
   let logged = "";
 
   try {

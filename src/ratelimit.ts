@@ -1,12 +1,46 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type http from "node:http";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 
 const DISCORD_PER_MIN = Number(process.env.RATE_DISCORD_PER_MIN ?? 10);
 const OTHER_PER_10MIN = Number(process.env.RATE_OTHER_PER_10MIN ?? 3);
 const GLOBAL_PER_MIN = Number(process.env.RATE_GLOBAL_PER_MIN ?? 20);
 const STORE_MAX = 10_000;
 const DISCORD_UA = /Discordbot/i;
+const DISCORD_RANGES_URL = process.env.DISCORD_IPRANGES_URL ?? "https://cdn.discordapp.com/ipranges/discord.json";
+const DISCORD_IPS_STRICT = process.env.DISCORD_IPS_STRICT === "1";
+
+let discordRanges: BlockList | null = null;
+
+async function loadDiscordRanges(): Promise<void> {
+  try {
+    const res = await fetch(DISCORD_RANGES_URL, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = (await res.json()) as { prefixes?: { ipv4Prefix?: string; ipv6Prefix?: string }[] };
+    const list = new BlockList();
+    let count = 0;
+    for (const p of data.prefixes ?? []) {
+      const cidr = p.ipv4Prefix ?? p.ipv6Prefix;
+      if (!cidr) continue;
+      const [address, bits] = cidr.split("/");
+      if (!address || !bits || !isIP(address)) continue;
+      list.addSubnet(address, Number(bits), p.ipv4Prefix ? "ipv4" : "ipv6");
+      count++;
+    }
+    if (count === 0) throw new Error("no prefixes");
+    discordRanges = list;
+    console.log(`[discord] loaded ${count} address ranges`);
+  } catch (e) {
+    console.warn(`[discord] address ranges not loaded: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+void loadDiscordRanges();
+setInterval(() => void loadDiscordRanges(), 6 * 3600_000).unref();
+
+function listedAsDiscord(ip: string): boolean {
+  return discordRanges !== null && isIP(ip) > 0 && discordRanges.check(ip, isIP(ip) === 4 ? "ipv4" : "ipv6");
+}
 
 const SECRET = randomBytes(32);
 const hits = new Map<string, number[]>();
@@ -32,10 +66,6 @@ function isPrivate(ip: string): boolean {
   );
 }
 
-export function isDiscord(userAgent: string): boolean {
-  return DISCORD_UA.test(userAgent);
-}
-
 function rawClientIp(req: http.IncomingMessage): string {
   const peer = normalize(req.socket.remoteAddress);
   if (!isPrivate(peer)) return peer;
@@ -45,8 +75,19 @@ function rawClientIp(req: http.IncomingMessage): string {
   return isIP(forwarded) ? normalize(forwarded) : peer;
 }
 
-export function clientId(req: http.IncomingMessage): string {
-  return createHmac("sha256", SECRET).update(rawClientIp(req)).digest("hex").slice(0, 16);
+export interface Requester {
+  id: string;
+  discord: boolean;
+  unlisted: boolean;
+}
+
+export function identify(req: http.IncomingMessage, userAgent: string): Requester {
+  const ip = rawClientIp(req);
+  const id = createHmac("sha256", SECRET).update(ip).digest("hex").slice(0, 16);
+  const listed = listedAsDiscord(ip);
+  const claimsDiscord = DISCORD_UA.test(userAgent);
+  const unlisted = claimsDiscord && !listed && discordRanges !== null;
+  return { id, discord: listed || (claimsDiscord && !(DISCORD_IPS_STRICT && discordRanges !== null)), unlisted };
 }
 
 export function allowFetch(id: string, discord: boolean): boolean {
