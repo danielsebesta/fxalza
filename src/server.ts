@@ -243,7 +243,9 @@ function shortName(name: string, max = 70): string {
 }
 
 function embedHtml(p: ProductData | null, path: string, stale: boolean, carried = ""): string {
-  const fallbackTitle = slugTitle(path);
+  const slugged = slugTitle(path);
+  const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
+  const fallbackTitle = slugged === "Produkt" && productId ? `Produkt z Alzy (${productId})` : slugged;
   const canonical = p?.canonicalUrl ?? `https://www.alza.cz${path}`;
 
   const offers = (p?.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
@@ -259,7 +261,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     for (const b of offers) parts.push(benefitLine(b));
     if (stale) parts.push("data mohou být starší");
   } else {
-    parts.push("Odkaz na Alza.cz - při načítání ceny nastala chyba");
+    parts.push("Produkt se nepodařilo načíst, zkus odkaz otevřít přímo na Alze.");
   }
   let desc = parts.join(" • ");
   if (p?.description) {
@@ -298,7 +300,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     `<meta name="twitter:title" content="${esc(title)}">`,
     `<meta name="twitter:description" content="${esc(desc)}">`,
     img ? `<meta name="twitter:image" content="${esc(img)}">` : "",
-    `<meta name="theme-color" content="#0f6fc5">`,
+    `<meta name="theme-color" content="${p ? "#0f6fc5" : "#e5484d"}">`,
   ]
     .filter(Boolean)
     .join("\n  ");
