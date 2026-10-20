@@ -29,7 +29,7 @@ Server poslouchá na `http://127.0.0.1:8484`. Konfiguraci zkopíruj z `.env.exam
 | `PORT` / `HOST`  | 8484 / 127.0.0.1    | adresa serveru                          |
 | `PUBLIC_URL`     | `https://fxalza.cz` | veřejná adresa                          |
 | `IMG_W`          | 600                 | velikost obrázku v náhledu (px)         |
-| `CACHE_TTL_MS`   | 6 h                 | jak dlouho se drží data produktu        |
+| `CACHE_TTL_MS`   | 24 h                | jak dlouho se drží data produktu        |
 | `BENEFITS`       | 1                   | `0` vypne kupóny a klubové ceny         |
 
 ## API
