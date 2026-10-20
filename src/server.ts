@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fetchProduct, slugTitle, stopSidecar, type BenefitEntry, type ProductData } from "./alza.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
-import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
+import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml, problemHtml } from "./landing.ts";
 import { allowFetch, identify, type Requester } from "./ratelimit.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
@@ -115,6 +115,26 @@ async function getProduct(id: string, path: string, who: Requester): Promise<Pro
     const old = getCached(id, true);
     return { data: old, stale: old !== null };
   }
+}
+
+function sendProblem(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  isBot: boolean,
+  status: number,
+  title: string,
+  message: string,
+  extra: Record<string, string> = {},
+): void {
+  res.writeHead(isBot ? 200 : status, {
+    "content-type": "text/html; charset=utf-8",
+    "content-security-policy": LANDING_CSP,
+    "cache-control": "no-store",
+    "x-robots-tag": "noindex",
+    vary: "User-Agent",
+    ...extra,
+  });
+  res.end(req.method === "HEAD" ? undefined : problemHtml(title, message));
 }
 
 function esc(s: string): string {
@@ -479,8 +499,19 @@ const server = http.createServer(async (req, res) => {
           600,
         );
       } else {
-        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-        res.end("Neznámá cesta. Použij tvar /<slug>-d<id>.htm nebo /d<id>.\n");
+        if (pathname.startsWith("/.well-known/")) {
+          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+          res.end("Not found\n");
+        } else {
+          sendProblem(
+            req,
+            res,
+            isBot,
+            404,
+            "Tohle není odkaz na produkt z Alzy",
+            "Odkaz na produkt na Alze končí na -d1234567.htm. V takovém odkazu změň alza.cz na fxalza.cz a Discord ukáže náhled.",
+          );
+        }
       }
       return;
     }
@@ -517,8 +548,7 @@ const server = http.createServer(async (req, res) => {
 
     const { data, stale, limited } = await getProduct(parsed.id, parsed.path, who);
     if (limited) {
-      res.writeHead(429, { "content-type": "text/plain; charset=utf-8", "retry-after": "60", "cache-control": "no-store" });
-      res.end("Příliš mnoho požadavků, zkus to za chvíli.\n");
+      sendProblem(req, res, isBot, 429, "Moc požadavků najednou", "Náhled se teď načítá pro hodně odkazů. Zkus to prosím za chvíli.", { "retry-after": "60" });
       return;
     }
     const html = embedHtml(data, parsed.path, stale, carriedQuery(u.searchParams));
@@ -548,8 +578,7 @@ const server = http.createServer(async (req, res) => {
       });
       res.end(html);
     } else if (!res.headersSent) {
-      res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-      res.end("Interní chyba\n");
+      sendProblem(req, res, isBot, 500, "Něco se pokazilo", "Náhled se teď nepodařilo vytvořit. Zkus to prosím za chvíli.");
     } else {
       res.end();
     }

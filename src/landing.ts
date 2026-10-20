@@ -139,6 +139,44 @@ Stačí v odkazu na produkt přepsat alza.cz na ${new URL(PUBLIC_URL).hostname} 
 - [Zdrojový kód](${GITHUB}): licence MIT
 `;
 
+export function problemHtml(title: string, message: string): string {
+  return `<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)} | fxalza</title>
+<meta name="description" content="${esc(message)}">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#07090d">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="fxalza">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(message)}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:description" content="${esc(message)}">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+${FONT_CSS}
+${BASE_CSS}
+html{background:var(--glow) no-repeat,var(--bg);min-height:100%}
+body{max-width:34rem;margin:0 auto;padding:6rem 1.25rem 3rem;color:var(--fg);font:17px/1.7 var(--text);text-align:center;-webkit-font-smoothing:antialiased}
+.logo{display:block;width:4rem;height:4rem;margin:0 auto 1rem}
+h1{font-size:1.8rem;line-height:1.25;letter-spacing:-.02em;color:var(--head);margin:0 0 .8rem}
+</style>
+</head>
+<body>
+<img class="logo" src="/favicon.svg" width="64" height="64" alt="">
+<h1>${esc(title)}</h1>
+<p>${esc(message)}</p>
+<p><a href="/">Zpět na fxalza</a></p>
+</body>
+</html>
+`;
+}
+
 export function landingHtml(host: string, disclaimer: string): string {
   const h = esc(host);
   const ld = JSON.stringify({
