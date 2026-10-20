@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 const GITHUB = "https://github.com/danielsebesta/fxalza";
 const AUTHOR = "Daniel Šebesta";
-const AUTHOR_URL = "https://Sebesta.dev";
+const AUTHOR_URL = "https://sebesta.dev";
 export const PUBLIC_URL = (process.env.PUBLIC_URL ?? "https://fxalza.cz").replace(/\/$/, "");
 
 function esc(s: string): string {
