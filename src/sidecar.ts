@@ -30,8 +30,6 @@ export class Sidecar {
   private lastSpawn = 0;
 
   private cmd(): string[] {
-    const custom = process.env.CF_SIDECAR_CMD;
-    if (custom) return custom.split(" ").filter(Boolean);
     return ["uv", "run", "--with", "curl_cffi", "python", "-u", SCRIPT];
   }
 

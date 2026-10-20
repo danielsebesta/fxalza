@@ -131,8 +131,7 @@ function withUtm(url: string): string {
   return url + (url.includes("?") ? "&" : "?") + UTM;
 }
 
-const CONTROL_PARAMS = new Set(["debug", "format", "plain", "v"]);
-const COMPONENT_EMBEDS = process.env.COMPONENT_EMBEDS !== "0";
+const CONTROL_PARAMS = new Set(["format", "v"]);
 
 function carriedQuery(params: URLSearchParams): string {
   const kept = new URLSearchParams();
@@ -228,7 +227,7 @@ function shortName(name: string, max = 70): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
 }
 
-function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefresh: boolean, carried = "", components = true): string {
+function embedHtml(p: ProductData | null, path: string, stale: boolean, carried = ""): string {
   const fallbackTitle = slugTitle(path);
   const canonical = p?.canonicalUrl ?? `https://www.alza.cz${path}`;
 
@@ -260,7 +259,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
   }
 
   const img = p?.image ? `${p.image}?width=${IMG_W}&height=${IMG_W}` : null;
-  const componentJson = p && components ? componentEmbedJson(p, canonical, img, carried) : null;
+  const componentJson = p ? componentEmbedJson(p, canonical, img, carried) : null;
 
   const tags = [
     `<meta charset="utf-8">`,
@@ -279,7 +278,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     p?.price != null ? `<meta property="product:price:amount" content="${p.price}">` : "",
     p?.price != null ? `<meta property="product:price:currency" content="CZK">` : "",
     componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : "",
-    metaRefresh ? `<meta http-equiv="refresh" content="0;url=${esc(outbound(canonical, carried))}">` : "",
+    `<meta http-equiv="refresh" content="0;url=${esc(outbound(canonical, carried))}">`,
     `<meta name="twitter:card" content="${img ? "summary_large_image" : "summary"}">`,
     `<meta name="twitter:title" content="${esc(title)}">`,
     `<meta name="twitter:description" content="${esc(desc)}">`,
@@ -490,8 +489,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const isDebug = u.searchParams.get("debug") === "1";
-
     if (u.searchParams.get("format") === "json") {
       const { data, stale, limited } = await getProduct(parsed.id, parsed.path, who);
       if (limited) {
@@ -514,7 +511,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (!isBot && !isDebug) {
+    if (!isBot) {
       const known = getCached(parsed.id, true);
       const target = outbound(known?.canonicalUrl ?? `https://www.alza.cz${parsed.path}`, carriedQuery(u.searchParams));
       res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
@@ -528,7 +525,7 @@ const server = http.createServer(async (req, res) => {
       res.end("Příliš mnoho požadavků, zkus to za chvíli.\n");
       return;
     }
-    const html = embedHtml(data, parsed.path, stale, !isDebug, carriedQuery(u.searchParams), COMPONENT_EMBEDS && u.searchParams.get("plain") !== "1");
+    const html = embedHtml(data, parsed.path, stale, carriedQuery(u.searchParams));
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
@@ -547,7 +544,7 @@ const server = http.createServer(async (req, res) => {
       fallback = null;
     }
     if (!res.headersSent && isBot && fallback) {
-      const html = embedHtml(null, fallback.path, false, true, fallbackQuery);
+      const html = embedHtml(null, fallback.path, false, fallbackQuery);
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
