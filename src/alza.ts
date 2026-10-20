@@ -42,6 +42,7 @@ const AVAILABILITY_CS: Record<string, string> = {
 };
 
 const BENEFITS_ENABLED = process.env.BENEFITS !== "0";
+const BENEFITS_GRACE_MS = Number(process.env.BENEFITS_GRACE_MS ?? 1500);
 
 interface TierDef {
   name: string;
@@ -348,15 +349,13 @@ function cleanDescription(raw: unknown): string | undefined {
   return cut.slice(0, at > 60 ? at : 160).replace(/[\s,;:–-]+$/, "") + "…";
 }
 
-export async function fetchProduct(id: string, path: string): Promise<ProductData> {
+export async function fetchProduct(
+  id: string,
+  path: string,
+  onLateBenefits?: (benefits: BenefitEntry[]) => void,
+): Promise<ProductData> {
   const benefitsPromise: Promise<BenefitEntry[]> = BENEFITS_ENABLED
-    ? Promise.race([
-        fetchBenefits(id),
-        new Promise<BenefitEntry[]>((resolve) => {
-          const t = setTimeout(() => resolve([]), 9000);
-          t.unref?.();
-        }),
-      ]).catch((e) => {
+    ? fetchBenefits(id).catch((e) => {
         console.error(`[benefits] ${id}: ${e instanceof Error ? e.message : e}`);
         return [] as BenefitEntry[];
       })
@@ -400,7 +399,25 @@ export async function fetchProduct(id: string, path: string): Promise<ProductDat
   if (offers?.url) canonicalUrl = String(offers.url);
   else if (typeof p["@id"] === "string") canonicalUrl = String(p["@id"]).replace(/#.*$/, "");
 
-  const benefits = await benefitsPromise;
+  let benefits: BenefitEntry[] = [];
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  const ready = await Promise.race([
+    benefitsPromise.then((b) => ({ b })),
+    new Promise<null>((resolve) => {
+      grace = setTimeout(() => resolve(null), BENEFITS_GRACE_MS);
+    }),
+  ]);
+  clearTimeout(grace);
+  if (ready) benefits = ready.b;
+  else {
+    console.log(`[benefits] ${id} not ready after ${BENEFITS_GRACE_MS}ms, answering without them`);
+    void benefitsPromise.then((b) => {
+      if (b.length > 0) {
+        console.log(`[benefits] ${id} arrived late (${b.length})`);
+        onLateBenefits?.(b);
+      }
+    });
+  }
 
   return {
     id,

@@ -60,7 +60,10 @@ const inflight = new Map<string, Promise<ProductData>>();
 function refresh(id: string, path: string): Promise<ProductData> {
   let p = inflight.get(id);
   if (!p) {
-    p = fetchProduct(id, path)
+    p = fetchProduct(id, path, (benefits) => {
+      const current = getCached(id, true);
+      if (current) putCached(id, { ...current, benefits });
+    })
       .then((d) => {
         putCached(id, d);
         return d;
