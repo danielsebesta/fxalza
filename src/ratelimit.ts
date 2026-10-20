@@ -8,6 +8,7 @@ const GLOBAL_PER_MIN = Number(process.env.RATE_GLOBAL_PER_MIN ?? 45);
 const OTHER_GLOBAL_PER_MIN = Number(process.env.RATE_OTHER_GLOBAL_PER_MIN ?? 6);
 const STORE_MAX = 10_000;
 const DISCORD_UA = /Discordbot/i;
+const TELEGRAM_UA = /TelegramBot/i;
 const DISCORD_RANGES_URL = process.env.DISCORD_IPRANGES_URL ?? "https://cdn.discordapp.com/ipranges/discord.json";
 const DISCORD_IPS_STRICT = process.env.DISCORD_IPS_STRICT !== "0";
 
@@ -80,6 +81,7 @@ function rawClientIp(req: http.IncomingMessage): string {
 export interface Requester {
   id: string;
   discord: boolean;
+  telegram: boolean;
   unlisted: boolean;
 }
 
@@ -88,8 +90,9 @@ export function identify(req: http.IncomingMessage, userAgent: string): Requeste
   const id = createHmac("sha256", SECRET).update(ip).digest("hex").slice(0, 16);
   const listed = listedAsDiscord(ip);
   const claimsDiscord = DISCORD_UA.test(userAgent);
+  const telegram = TELEGRAM_UA.test(userAgent);
   const unlisted = claimsDiscord && !listed && discordRanges !== null;
-  return { id, discord: listed || (claimsDiscord && !(DISCORD_IPS_STRICT && discordRanges !== null)), unlisted };
+  return { id, discord: listed || (claimsDiscord && !(DISCORD_IPS_STRICT && discordRanges !== null)), telegram, unlisted };
 }
 
 export function allowFetch(id: string, discord: boolean): boolean {

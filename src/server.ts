@@ -109,13 +109,13 @@ async function getProduct(id: string, path: string, who: Requester): Promise<Pro
     const old = getCached(id, true);
     return { data: old, stale: old !== null, missing: bad.missing && old === null };
   }
-  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, who.discord);
+  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, who.discord || who.telegram);
   if (hit?.state === "stale") {
     if (mayFetch()) refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));
     return { data: hit.data, stale: false };
   }
   if (!mayFetch()) {
-    console.warn(`[rate] ${who.discord ? "discord" : "other"} ${who.id} limited on ${id}`);
+    console.warn(`[rate] ${who.discord ? "discord" : who.telegram ? "telegram" : "other"} ${who.id} limited on ${id}`);
     const old = getCached(id, true);
     return old ? { data: old, stale: true } : { data: null, stale: false, limited: true };
   }
@@ -190,14 +190,14 @@ function mdEsc(s: string): string {
   return s.replace(/([\\*_[\]~`|])/g, "\\$1");
 }
 
-function benefitLine(e: BenefitEntry, custom = false): string {
+function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
   const shownPercent = e.percentShown ?? (e.percent === null ? null : Math.round(e.percent));
   const pct = shownPercent !== null && shownPercent > 0 ? ` (−${shownPercent} %)` : "";
   const was = e.wasPriceText ? `${e.wasPriceText} → ` : "";
   const name = e.note ? `${e.label} + ${e.note}` : e.label;
-  if (!custom) return `${benefitEmoji(e, false)} ${name} ${was}${e.priceText}${pct}`;
+  if (!rich) return `${benefitEmoji(e, custom)} ${name} ${was}${e.priceText}${pct}`;
   const label = name.replace(/^(S kódem )([^\s`]+)$/, "$1`$2`");
-  return `${benefitEmoji(e, true)} ${label} ${was}**${e.priceText}**${pct}`;
+  return `${benefitEmoji(e, custom)} ${label} ${was}**${e.priceText}**${pct}`;
 }
 
 function stateText(p: ProductData): string {
@@ -205,13 +205,13 @@ function stateText(p: ProductData): string {
   return `${p.condition}, ${p.availabilityText.charAt(0).toLowerCase()}${p.availabilityText.slice(1)}`;
 }
 
-function componentEmbedJson(p: ProductData, canonical: string, img: string | null, carried: string): string | null {
+function componentEmbedJson(p: ProductData, canonical: string, img: string | null, carried: string, customEmoji: boolean): string | null {
   const titleUrl = carried ? outbound(canonical, carried) : canonical;
   const titleLine = `### **[${mdEsc(p.name)}](${titleUrl})** (${stateText(p)})`;
   const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale");
   const priceLine =
-    p.priceText && !hasSale ? `${emojiMd("alza_price", "🏷️")} Cena **${p.priceText}**` : null;
-  const benefitLines = [...(priceLine ? [priceLine] : []), ...(p.benefits ?? []).map((b) => benefitLine(b, true))];
+    p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} Cena **${p.priceText}**` : null;
+  const benefitLines = [...(priceLine ? [priceLine] : []), ...(p.benefits ?? []).map((b) => benefitLine(b, true, customEmoji))];
   const humanUrl = outbound(canonical, carried);
   const historyUrl = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(canonical)}`;
 
@@ -243,9 +243,9 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
           style: 5,
           url: humanUrl,
           label: "Otevřít na Alze",
-          ...(emojiRef("alza_logo") ? { emoji: emojiRef("alza_logo") } : {}),
+          ...(customEmoji && emojiRef("alza_logo") ? { emoji: emojiRef("alza_logo") } : {}),
         },
-        ...(historyUrl.length <= 512 ? [{ type: 2, style: 5, url: historyUrl, label: "Hlídač shopů", emoji: emojiRef("hlidac_shopu") ?? { name: "📈" } }] : []),
+        ...(historyUrl.length <= 512 ? [{ type: 2, style: 5, url: historyUrl, label: "Hlídač shopů", ...(customEmoji ? { emoji: emojiRef("hlidac_shopu") ?? { name: "📈" } } : {}) }] : []),
       ],
     });
     return JSON.stringify({ component: { type: 17, accent_color: 1011653, components } }).replace(
@@ -271,7 +271,7 @@ function shortName(name: string, max = 70): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
 }
 
-function embedHtml(p: ProductData | null, path: string, stale: boolean, carried = "", missing = false): string {
+function embedHtml(p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true): string {
   const slugged = slugTitle(path);
   const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
   const fallbackTitle = slugged === "Produkt" && productId ? `Produkt z Alzy (${productId})` : slugged;
@@ -287,7 +287,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
   const parts: string[] = [];
   if (p) {
     if (p.priceText && !offers.some((b) => b.kind === "sale")) parts.push(p.priceText);
-    for (const b of offers) parts.push(benefitLine(b));
+    for (const b of customEmoji ? offers : p.benefits ?? []) parts.push(benefitLine(b));
     if (stale) parts.push("data mohou být starší");
   } else {
     parts.push(missing ? "Tenhle produkt na Alze už nenajdeme, odkaz je nejspíš neplatný." : "Produkt se nepodařilo načíst, zkus odkaz otevřít přímo na Alze.");
@@ -305,7 +305,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
   }
 
   const img = p?.image ? `${p.image}?width=${IMG_W}&height=${IMG_W}` : null;
-  const componentJson = p ? componentEmbedJson(p, canonical, img, carried) : null;
+  const componentJson = p && customEmoji ? componentEmbedJson(p, canonical, img, carried, true) : null;
 
   const tags = [
     `<meta charset="utf-8">`,
@@ -318,13 +318,13 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     img ? `<meta property="og:image" content="${esc(img)}">` : "",
     img ? `<meta property="og:image:width" content="${IMG_W}">` : "",
     img ? `<meta property="og:image:height" content="${IMG_W}">` : "",
-    `<meta property="og:url" content="${esc(canonical)}">`,
+    customEmoji ? `<meta property="og:url" content="${esc(canonical)}">` : "",
     `<meta property="og:locale" content="cs_CZ">`,
     img ? `<meta property="og:image:alt" content="${esc(title)}">` : "",
     p?.price != null ? `<meta property="product:price:amount" content="${p.price}">` : "",
     p?.price != null ? `<meta property="product:price:currency" content="CZK">` : "",
     componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : "",
-    `<meta http-equiv="refresh" content="0;url=${esc(outbound(canonical, carried))}">`,
+    customEmoji ? `<meta http-equiv="refresh" content="0;url=${esc(outbound(canonical, carried))}">` : "",
     `<meta name="twitter:card" content="${img ? "summary_large_image" : "summary"}">`,
     `<meta name="twitter:title" content="${esc(title)}">`,
     `<meta name="twitter:description" content="${esc(desc)}">`,
@@ -586,7 +586,7 @@ const server = http.createServer(async (req, res) => {
       sendProblem(req, res, isBot, 503, "Náhled se nepodařilo načíst", "Alza teď neodpovídá nebo je moc požadavků. Zkus to prosím za chvíli.", { "retry-after": "30" }, false);
       return;
     }
-    const html = embedHtml(data, parsed.path, stale, carriedQuery(u.searchParams), missing);
+    const html = embedHtml(data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram);
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
