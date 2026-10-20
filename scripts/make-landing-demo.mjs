@@ -129,7 +129,7 @@ async function renderProduct(p) {
         e("style", { dangerouslySetInnerHTML: { __html: globalStyles } }),
         e(
           DiscordMessage,
-          { author: "Uživatel", avatar: "https://cdn.discordapp.com/embed/avatars/0.png", timestamp: "2026-10-18T21:45:00.000Z" },
+          { author: "samsepi0l", avatar: "https://cdn.discordapp.com/embed/avatars/0.png", timestamp: "2026-10-18T21:45:00.000Z" },
           e("a", { href: link, style: { color: "#2781e7", textDecoration: "none" } }, link),
           e(DiscordAttachments, { slot: "components" }, render(p.component, p.thumb)),
         ),
@@ -156,12 +156,7 @@ const emojiIds = JSON.parse(readFileSync(new URL("../assets/emoji/ids.json", imp
 const emojiPng = Object.fromEntries(
   Object.keys(emojiIds).map((n) => [n, readFileSync(new URL(`../assets/emoji/small/${n}.png`, import.meta.url)).toString("base64")]),
 );
-const AVATAR =
-  "data:image/svg+xml;utf8," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="40" fill="#5865f2"/>' +
-      '<circle cx="40" cy="32" r="12" fill="#fff"/><path d="M16 66c3-14 14-20 24-20s21 6 24 20z" fill="#fff"/></svg>',
-  );
+const AVATAR = "data:image/jpeg;base64," + readFileSync(new URL("../assets/demo/avatar.jpg", import.meta.url)).toString("base64");
 
 const products = [];
 for (const p of PRODUCTS) products.push(await loadProduct(p));
