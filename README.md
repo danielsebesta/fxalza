@@ -1,7 +1,7 @@
-# fxalza
-
-> [!NOTE]
+> [!WARNING]
 > Neoficiální nástroj, s Alza.cz nijak nesouvisí.
+
+# fxalza
 
 Open source nástroj, který v Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.
 
