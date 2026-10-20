@@ -131,7 +131,8 @@ function withUtm(url: string): string {
   return url + (url.includes("?") ? "&" : "?") + UTM;
 }
 
-const CONTROL_PARAMS = new Set(["debug", "format", "v"]);
+const CONTROL_PARAMS = new Set(["debug", "format", "plain", "v"]);
+const COMPONENT_EMBEDS = process.env.COMPONENT_EMBEDS !== "0";
 
 function carriedQuery(params: URLSearchParams): string {
   const kept = new URLSearchParams();
@@ -221,34 +222,37 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
   return fits(lean) ? lean : null;
 }
 
-function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefresh: boolean, carried = ""): string {
+function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefresh: boolean, carried = "", components = true): string {
   const fallbackTitle = slugTitle(path);
   const canonical = p?.canonicalUrl ?? `https://www.alza.cz${path}`;
 
-  let title = p?.name ?? fallbackTitle;
-  if (p?.priceText) title = `${p.name} | ${p.priceText}`;
+  const title = p ? `${p.name} (${p.availabilityText})` : fallbackTitle;
 
+  const DESC_MAX_BYTES = 330;
+  const bytes = (t: string): number => Buffer.byteLength(t, "utf8");
   const parts: string[] = [];
   if (p) {
-    parts.push(p.availabilityText);
-    if (p.rating !== null && p.rating > 0) {
-      const stars = `${p.rating.toFixed(1).replace(".", ",")}/5`;
-      parts.push(`★ ${stars}${p.ratingCount ? ` (${p.ratingCount} hodnocení)` : ""}`);
-    }
-    for (const b of p.benefits ?? []) parts.push(benefitLine(b));
-    if (p.brand) parts.push(p.brand);
+    const offers = (p.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
+    if (p.priceText && !offers.some((b) => b.kind === "sale")) parts.push(p.priceText);
+    for (const b of offers) parts.push(benefitLine(b));
     if (stale) parts.push("data mohou být starší");
   } else {
     parts.push("Odkaz na Alza.cz - při načítání ceny nastala chyba");
   }
   let desc = parts.join(" • ");
-  while (Buffer.byteLength(desc, "utf8") > 330 && parts.length > 1) {
-    parts.pop();
-    desc = parts.join(" • ");
+  if (p?.description) {
+    const room = DESC_MAX_BYTES - bytes(desc) - (desc ? 3 : 0);
+    let snippet = p.description;
+    if (bytes(snippet) > room) {
+      snippet = snippet.replace(/…$/, "");
+      while (snippet.length > 0 && bytes(snippet) + 1 > room) snippet = snippet.slice(0, -4);
+      snippet = snippet.slice(0, Math.max(snippet.lastIndexOf(" "), 0)).replace(/[\s,;:-]+$/, "") + "…";
+    }
+    if (snippet.length >= 30) desc = desc ? `${desc} • ${snippet}` : snippet;
   }
 
   const img = p?.image ? `${p.image}?width=${IMG_W}&height=${IMG_W}` : null;
-  const componentJson = p ? componentEmbedJson(p, canonical, img, carried) : null;
+  const componentJson = p && components ? componentEmbedJson(p, canonical, img, carried) : null;
 
   const tags = [
     `<meta charset="utf-8">`,
@@ -512,7 +516,7 @@ const server = http.createServer(async (req, res) => {
       res.end("Příliš mnoho požadavků, zkus to za chvíli.\n");
       return;
     }
-    const html = embedHtml(data, parsed.path, stale, !isDebug, carriedQuery(u.searchParams));
+    const html = embedHtml(data, parsed.path, stale, !isDebug, carriedQuery(u.searchParams), COMPONENT_EMBEDS && u.searchParams.get("plain") !== "1");
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
