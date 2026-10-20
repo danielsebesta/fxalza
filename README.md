@@ -1,5 +1,8 @@
 # fxalza
 
+> [!NOTE]
+> Neoficiální nástroj, s Alza.cz nijak nesouvisí.
+
 Open source nástroj, který v Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.
 
 Stačí v odkazu přepsat `alza.cz` na `fxalza.cz`:
@@ -9,8 +12,6 @@ https://www.alza.cz/<produkt>-d12345.htm  →  https://fxalza.cz/<produkt>-d1234
 ```
 
 Kdo odkaz otevře v prohlížeči, skončí rovnou na Alze.
-
-**Neoficiální nástroj, s Alza.cz nijak nesouvisí.**
 
 ## Poděkování
 
