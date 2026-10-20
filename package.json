@@ -1,0 +1,24 @@
+{
+  "name": "fxalza",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord embed fixer for Alza.cz product links (PoC)",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.ts",
+    "check": "tsc --noEmit",
+    "emoji": "uv run --with resvg-py --with pillow python scripts/make-emoji.py && node --env-file=.env scripts/upload-emoji.mjs",
+    "landing-demo": "node scripts/make-landing-demo.mjs"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "discord-html-transcripts-v2": "^4.6.2",
+    "discord.js": "^14.27.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "^5.9.0"
+  }
+}
