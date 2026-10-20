@@ -1,0 +1,421 @@
+import { fetchUrl } from "./fetcher.ts";
+
+export { stopSidecar } from "./fetcher.ts";
+
+export interface BenefitEntry {
+  kind: "sale" | "coupon" | "alzaplus" | "cashback" | "tradein" | "promo" | "tier";
+  label: string;
+  price: number;
+  priceText: string;
+  percent: number | null;
+  wasPriceText?: string;
+  note?: string;
+}
+
+export interface ProductData {
+  id: string;
+  name: string;
+  price: number | null;
+  priceText: string | null;
+  availability: string;
+  availabilityText: string;
+  rating: number | null;
+  ratingCount: number | null;
+  brand: string | null;
+  description?: string;
+  image: string | null;
+  canonicalUrl: string;
+  benefits: BenefitEntry[];
+  fetchedAt: string;
+}
+
+const AVAILABILITY_CS: Record<string, string> = {
+  InStock: "Skladem",
+  OutOfStock: "Není skladem",
+  PreOrder: "Předprodej",
+  PreSale: "Předprodej",
+  BackOrder: "Na objednávku",
+  LimitedAvailability: "Poslední kusy",
+  InStoreOnly: "Jen na prodejně",
+  SoldOut: "Vyprodáno",
+  OnlineOnly: "Jen online",
+};
+
+const BENEFITS_ENABLED = process.env.BENEFITS !== "0";
+
+interface TierDef {
+  name: string;
+  pgrik: string;
+  reference?: boolean;
+}
+
+const TIERS: TierDef[] = [
+  { name: "Gold", pgrik: "p_pg4_e6c95" },
+  { name: "Silver", pgrik: "p_pg3_36eef" },
+  { name: "ISIC", pgrik: "p_pg3is1_2b2fc" },
+  { name: "Bronze", pgrik: "p_pg5_44266" },
+  { name: "B2B", pgrik: "p_pg6_6ce49" },
+  { name: "Basic", pgrik: "p__26752", reference: true },
+];
+
+interface PriceCandidate {
+  amount: number;
+  promo: boolean;
+  priceType: number | null;
+  name: string;
+  coupon: string;
+}
+
+interface TierResult {
+  tier: string;
+  hidden: boolean;
+  selected: PriceCandidate | null;
+  main: PriceCandidate | null;
+  promos: PriceCandidate[];
+  compare?: number;
+}
+
+function findPricingNode(node: unknown, depth = 0): any | null {
+  if (!node || typeof node !== "object" || depth > 30) return null;
+  const n = node as Record<string, any>;
+  if (n.mainPriceTag || Array.isArray(n.promoPrices)) return n;
+  for (const child of Object.values(n)) {
+    const r = findPricingNode(child, depth + 1);
+    if (r) return r;
+  }
+  return null;
+}
+
+function priceCandidate(v: any, promo = false): PriceCandidate | null {
+  if (!v || !["string", "number"].includes(typeof v.primaryPrice)) return null;
+  const price = String(v.primaryPrice).trim();
+  let numeric = price
+    .replace(/\s/g, "")
+    .replace(/(?:Kč|CZK|€|EUR|Ft|HUF)$/i, "")
+    .replace(/[,.][-–—]$/, "");
+  if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(numeric)) numeric = numeric.replace(/\./g, "");
+  if (!/^\d+(?:[,.]\d{1,2})?$/.test(numeric)) return null;
+  const amount = Number(numeric.replace(",", "."));
+  if (!Number.isFinite(amount)) return null;
+  return {
+    amount,
+    promo,
+    priceType: typeof v.priceType === "number" ? v.priceType : null,
+    name: promo && typeof v.name === "string" ? v.name.trim() : "",
+    coupon: promo && typeof v.discountCouponCode === "string" ? v.discountCouponCode.trim() : "",
+  };
+}
+
+function computeTier(pricing: any, reference: boolean): Omit<TierResult, "tier"> {
+  const main = pricing.mainPriceTag;
+  if (!reference && main?.priceGroupType === 0 && main.priceType !== 7) {
+    return { hidden: true, selected: null, main: null, promos: [] };
+  }
+  const mainCandidate = priceCandidate(main);
+  let selected = mainCandidate;
+  const promos: PriceCandidate[] = [];
+  for (const promo of Array.isArray(pricing.promoPrices) ? pricing.promoPrices : []) {
+    const next = priceCandidate(promo, true);
+    if (!next) continue;
+    promos.push(next);
+    if (!selected || next.amount < selected.amount) selected = next;
+  }
+  const compare = priceCandidate({ primaryPrice: main?.comparePrice });
+  const discountBase = compare || (selected?.promo ? mainCandidate : null);
+  if (!reference && (main?.priceType === 7 || main?.priceType === 4)) {
+    if (!selected || !discountBase || selected.amount === discountBase.amount) {
+      return { hidden: true, selected: null, main: mainCandidate, promos, ...(compare ? { compare: compare.amount } : {}) };
+    }
+  }
+  return { hidden: false, selected, main: mainCandidate, promos, ...(compare ? { compare: compare.amount } : {}) };
+}
+
+async function fetchTier(id: string, tier: TierDef): Promise<TierResult | null> {
+  const url = `https://webapi.alza.cz/api/commodity/v1/${id}/detailPriceInfoV3?country=CZ&pgrik=${tier.pgrik}&ucik=null`;
+  let res;
+  try {
+    res = await fetchUrl(url, {
+      headers: { Accept: "application/json, text/html;q=0.9" },
+      timeoutMs: 8000,
+      prefer: ["firecrawl"],
+    });
+  } catch {
+    return null;
+  }
+  if (res.status !== 200) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(res.body);
+  } catch {
+    return null;
+  }
+  const pricing = findPricingNode(data);
+  if (!pricing) return null;
+  return { tier: tier.name, ...computeTier(pricing, !!tier.reference) };
+}
+
+function fmtCzk2(n: number): string {
+  return new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 2 }).format(n).replace(/\u00A0/g, " ") + " Kč";
+}
+
+function promoTag(c: PriceCandidate): string {
+  if (c.priceType === 4) return "AlzaPlus+";
+  if (c.coupon) return "kód";
+  if (c.priceType === 2) return "výkup";
+  if (c.priceType === 1) return "cashback";
+  return c.name || "akce";
+}
+
+async function fetchBenefits(id: string): Promise<BenefitEntry[]> {
+  const settled = await Promise.allSettled(TIERS.map((t) => fetchTier(id, t)));
+  const byTier = new Map<string, TierResult>();
+  for (const s of settled) {
+    if (s.status === "fulfilled" && s.value) byTier.set(s.value.tier, s.value);
+  }
+
+  const basic = byTier.get("Basic");
+  const base = basic?.main?.amount ?? null;
+  const entries: BenefitEntry[] = [];
+  const percent = (amount: number): number | null =>
+    base && base > amount ? ((base - amount) / base) * 100 : null;
+
+  if (basic?.compare && base && basic.compare > base + 0.004) {
+    entries.push({
+      kind: "sale",
+      label: "Sleva",
+      price: base,
+      priceText: fmtCzk2(base),
+      percent: ((basic.compare - base) / basic.compare) * 100,
+      wasPriceText: fmtCzk2(basic.compare),
+    });
+  }
+
+  for (const pr of basic?.promos ?? []) {
+    if (!(base && pr.amount < base - 0.004)) continue;
+    let kind: BenefitEntry["kind"];
+    let label: string;
+    if (pr.priceType === 4) {
+      kind = "alzaplus";
+      label = "S AlzaPlus+";
+    } else if (pr.coupon) {
+      kind = "coupon";
+      label = `S kódem ${pr.coupon}`;
+    } else if (pr.priceType === 2) {
+      kind = "tradein";
+      label = pr.name || "S výkupním bonusem";
+    } else if (pr.priceType === 1) {
+      kind = "cashback";
+      label = pr.name || "S Cashback";
+    } else {
+      kind = "promo";
+      label = pr.name || "Akční cena";
+    }
+    entries.push({ kind, label, price: pr.amount, priceText: fmtCzk2(pr.amount), percent: percent(pr.amount) });
+  }
+
+  interface ClubRow {
+    names: string[];
+    listPrice: number;
+    best: number;
+    promo: PriceCandidate | null;
+  }
+  const rows: ClubRow[] = [];
+  for (const name of ["Gold", "Silver", "ISIC", "Bronze", "B2B"]) {
+    const t = byTier.get(name);
+    if (!t || t.hidden || !t.main || !t.selected) continue;
+    if (!(base && t.main.amount < base - 0.004)) continue;
+    const lowered = t.selected.amount < t.main.amount - 0.004;
+    rows.push({
+      names: [name],
+      listPrice: t.main.amount,
+      best: t.selected.amount,
+      promo: lowered ? t.selected : null,
+    });
+  }
+
+  for (const [source, into] of [["ISIC", "Silver"], ["B2B", "Bronze"]] as const) {
+    const s = rows.find((r) => r.names.includes(source));
+    const d = rows.find((r) => r.names.includes(into));
+    if (s && d && s !== d && Math.abs(s.listPrice - d.listPrice) < 0.005 && Math.abs(s.best - d.best) < 0.005) {
+      d.names = d.names.concat(s.names.filter((n) => !d.names.includes(n)));
+      rows.splice(rows.indexOf(s), 1);
+    }
+  }
+
+  for (const r of rows) {
+    entries.push({
+      kind: "tier",
+      label: r.names.join("/"),
+      price: r.best,
+      priceText: fmtCzk2(r.best),
+      percent: percent(r.best),
+      ...(r.promo ? { wasPriceText: fmtCzk2(r.listPrice), note: promoTag(r.promo) } : {}),
+    });
+  }
+
+  const KIND_ORDER: Record<BenefitEntry["kind"], number> = {
+    sale: -1,
+    coupon: 0,
+    alzaplus: 1,
+    cashback: 2,
+    tradein: 3,
+    promo: 4,
+    tier: 5,
+  };
+  entries.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.price - b.price);
+  return entries.slice(0, 8);
+}
+
+async function getHtml(path: string): Promise<string> {
+  const res = await fetchUrl(`https://www.alza.cz${path}`, {
+    headers: {
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+    },
+    timeoutMs: 25000,
+  });
+  if (res.status !== 200) throw new Error(`alza responded HTTP ${res.status} (via ${res.via})`);
+  return res.body;
+}
+
+function findProductNode(node: any): any | null {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const r = findProductNode(n);
+      if (r) return r;
+    }
+    return null;
+  }
+  const t = node["@type"];
+  if (t === "Product" || (Array.isArray(t) && t.includes("Product"))) return node;
+  if (node["@graph"]) {
+    const r = findProductNode(node["@graph"]);
+    if (r) return r;
+  }
+  if (node.mainEntity) {
+    const r = findProductNode(node.mainEntity);
+    if (r) return r;
+  }
+  return null;
+}
+
+function extractProductJsonLd(html: string): any | null {
+  const re = /<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi;
+  for (const m of html.matchAll(re)) {
+    try {
+      const node = findProductNode(JSON.parse(m[1]!));
+      if (node) return node;
+    } catch {
+    }
+  }
+  return null;
+}
+
+function fmtCzk(n: number): string {
+  return new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 }).format(n).replace(/\u00A0/g, " ");
+}
+
+export function slugTitle(path: string): string {
+  const seg = path.split("?")[0]!.split("/").filter(Boolean).pop() ?? path;
+  let s = seg.replace(/\.htm$/i, "").replace(/-d\d+$/i, "");
+  s = s.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return "Produkt";
+  s = s
+    .split(" ")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  s = s.replace(/\b(\d+)\s*(gb|tb|mb|kb|kg|mm|cm|hz|w)\b/gi, (_all, n: string, u: string) => `${n} ${u.toUpperCase()}`);
+  return s;
+}
+
+const HTML_ENTITIES: Record<string, string> = { quot: '"', amp: "&", lt: "<", gt: ">", apos: "'", nbsp: " " };
+
+function decodeEntities(t: string): string {
+  return t.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi, (m, dec?: string, hex?: string, name?: string) =>
+    dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16)) : (HTML_ENTITIES[name!.toLowerCase()] ?? m),
+  );
+}
+
+function cleanDescription(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const t = decodeEntities(raw.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+  if (t.length < 8) return undefined;
+  if (t.length <= 160) return t;
+  const cut = t.slice(0, 160);
+  const comma = cut.lastIndexOf(",");
+  const at = comma > 60 ? comma : cut.lastIndexOf(" ");
+  return cut.slice(0, at > 60 ? at : 160).replace(/[\s,;:–-]+$/, "") + "…";
+}
+
+export async function fetchProduct(id: string, path: string): Promise<ProductData> {
+  const benefitsPromise: Promise<BenefitEntry[]> = BENEFITS_ENABLED
+    ? Promise.race([
+        fetchBenefits(id),
+        new Promise<BenefitEntry[]>((resolve) => {
+          const t = setTimeout(() => resolve([]), 9000);
+          t.unref?.();
+        }),
+      ]).catch((e) => {
+        console.error(`[benefits] ${id}: ${e instanceof Error ? e.message : e}`);
+        return [] as BenefitEntry[];
+      })
+    : Promise.resolve([] as BenefitEntry[]);
+
+  const html = await getHtml(path);
+  const p = extractProductJsonLd(html);
+  if (!p) throw new Error("no Product JSON-LD found on the page");
+
+  const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
+
+  let price: number | null = null;
+  if (offers && offers.price !== undefined && offers.price !== null) {
+    const v = typeof offers.price === "number" ? offers.price : Number(String(offers.price).replace(",", "."));
+    if (Number.isFinite(v)) price = v;
+  }
+
+  let rating: number | null = null;
+  let ratingCount: number | null = null;
+  if (p.aggregateRating) {
+    const rv = Number(p.aggregateRating.ratingValue);
+    if (Number.isFinite(rv)) rating = rv;
+    const rc = Number(p.aggregateRating.ratingCount ?? p.aggregateRating.reviewCount);
+    if (Number.isFinite(rc)) ratingCount = rc;
+  }
+
+  let image: string | null = null;
+  const im = p.image;
+  if (Array.isArray(im) && im.length > 0) {
+    const first = im[0];
+    image = typeof first === "string" ? first : (first?.url ?? null);
+  } else if (typeof im === "string") {
+    image = im;
+  } else if (im?.url) {
+    image = String(im.url);
+  }
+
+  const availability = offers?.availability ? String(offers.availability).split("/").pop()! : "unknown";
+
+  let canonicalUrl = `https://www.alza.cz${path}`;
+  if (offers?.url) canonicalUrl = String(offers.url);
+  else if (typeof p["@id"] === "string") canonicalUrl = String(p["@id"]).replace(/#.*$/, "");
+
+  const benefits = await benefitsPromise;
+
+  return {
+    id,
+    name: decodeEntities(String(p.name ?? slugTitle(path))),
+    price,
+    priceText: price === null ? null : `${fmtCzk(price)} Kč`,
+    availability,
+    availabilityText: AVAILABILITY_CS[availability] ?? "Dostupnost na Alze",
+    rating,
+    ratingCount,
+    brand: p.brand?.name ? String(p.brand.name) : null,
+    ...(cleanDescription(p.description) ? { description: cleanDescription(p.description)! } : {}),
+    image,
+    canonicalUrl,
+    benefits,
+    fetchedAt: new Date().toISOString(),
+  };
+}
