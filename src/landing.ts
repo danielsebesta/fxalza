@@ -338,7 +338,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 
 <footer>
   <p>Vytvořil <a href="${AUTHOR_URL}" rel="author noopener">${AUTHOR}</a></p>
-  <p>${esc(disclaimer)}</p>
+${disclaimer.split("\n").map((line) => `  <p>${esc(line)}</p>`).join("\n")}
 </footer>
 <script>${SCRIPT}</script>
 </body>

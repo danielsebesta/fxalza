@@ -17,7 +17,7 @@ const APEX = new URL(PUBLIC_URL).hostname.toLowerCase();
 const SERVED_SUBDOMAINS = new Set(["www", "m"]);
 
 const UTM = "utm_source=fxalza&utm_medium=discord";
-const DISCLAIMER = "Neoficiální nástroj, s Alza.cz a.s. nijak nesouvisí. „Alza“ a „Alza.cz“ jsou ochranné známky společnosti Alza.cz a.s.";
+const DISCLAIMER = "Neoficiální nástroj, s Alza.cz a.s. nijak nesouvisí.\n„Alza“ a „Alza.cz“ jsou ochranné známky společnosti Alza.cz a.s.";
 
 interface Parsed {
   id: string;
@@ -314,7 +314,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     benefitRows.length > 0 ? `<ul>${benefitRows.join("")}</ul>` : "",
     img ? `<img src="${esc(img)}" width="240" alt="">` : "",
     `<p><a href="${esc(outbound(canonical, carried))}">Přejít na Alza.cz</a></p>`,
-    `<p class="note">${DISCLAIMER}</p>`,
+    `<p class="note">${DISCLAIMER.replace("\n", " ")}</p>`,
   ].filter(Boolean);
 
   return `<!DOCTYPE html>
