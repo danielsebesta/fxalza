@@ -67,6 +67,22 @@ export const LANDING_CSP = [
 const DESCRIPTION =
   "Open source nástroj, který v Discordu vykreslí pěkný náhled odkazů na Alza.cz: cenu, slevy, kupóny, cashback a klubové ceny Gold, Silver a Bronze.";
 
+export const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${PUBLIC_URL}/</loc></url>
+</urlset>
+`;
+
+export const LLMS_TXT = `# fxalza
+
+> ${DESCRIPTION}
+
+Stačí v odkazu na produkt přepsat www.alza.cz na ${new URL(PUBLIC_URL).hostname} a Discord ukáže cenu, slevy, kupóny a klubové ceny.
+
+- [Úvodní stránka](${PUBLIC_URL}/): návod a převodník odkazů
+- [Zdrojový kód](${GITHUB}): licence MIT
+`;
+
 export function landingHtml(host: string, disclaimer: string): string {
   const h = esc(host);
   const ld = JSON.stringify({

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fetchProduct, slugTitle, stopSidecar, type BenefitEntry, type ProductData } from "./alza.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
-import { FAVICON_SVG, LANDING_CSP, PUBLIC_URL, landingHtml } from "./landing.ts";
+import { FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -314,7 +314,7 @@ const ROBOTS_TXT = `User-agent: *
 Allow: /$
 Disallow: /
 
-# Link-preview endpoints (/<slug>-d<id>.htm) are for Discord and other embed bots only.
+Sitemap: ${PUBLIC_URL}/sitemap.xml
 `;
 
 const server = http.createServer(async (req, res) => {
@@ -364,6 +364,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === "/robots.txt") {
       sendStatic(req, res, ROBOTS_TXT, "text/plain; charset=utf-8", { "x-robots-tag": "all" }, 3600);
+      return;
+    }
+    if (u.pathname === "/sitemap.xml") {
+      sendStatic(req, res, SITEMAP_XML, "application/xml; charset=utf-8", { "x-robots-tag": "all" }, 3600);
+      return;
+    }
+    if (u.pathname === "/llms.txt") {
+      sendStatic(req, res, LLMS_TXT, "text/plain; charset=utf-8", { "x-robots-tag": "all" }, 3600);
       return;
     }
     let pathname = u.pathname;
