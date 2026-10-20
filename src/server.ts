@@ -224,7 +224,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     if (p.brand) parts.push(p.brand);
     if (stale) parts.push("data mohou být starší");
   } else {
-    parts.push("Odkaz na Alza.cz — při načítání ceny nastala chyba");
+    parts.push("Odkaz na Alza.cz - při načítání ceny nastala chyba");
   }
   let desc = parts.join(" • ");
   while (Buffer.byteLength(desc, "utf8") > 330 && parts.length > 1) {

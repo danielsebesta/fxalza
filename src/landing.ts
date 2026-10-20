@@ -162,7 +162,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>fxalza – náhledy odkazů z Alzy v Discordu</title>
+  <title>fxalza - náhledy odkazů z Alzy v Discordu</title>
   <meta name="description" content="${esc(DESCRIPTION)}">
   <meta name="author" content="${AUTHOR}">
   <meta name="application-name" content="fxalza">
@@ -180,10 +180,10 @@ export function landingHtml(host: string, disclaimer: string): string {
   <meta property="og:site_name" content="fxalza">
   <meta property="og:locale" content="cs_CZ">
   <meta property="og:url" content="${PUBLIC_URL}/">
-  <meta property="og:title" content="fxalza – náhledy odkazů z Alzy v Discordu">
+  <meta property="og:title" content="fxalza - náhledy odkazů z Alzy v Discordu">
   <meta property="og:description" content="${esc(DESCRIPTION)}">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="fxalza – náhledy odkazů z Alzy v Discordu">
+  <meta name="twitter:title" content="fxalza - náhledy odkazů z Alzy v Discordu">
   <meta name="twitter:description" content="${esc(DESCRIPTION)}">
   <script type="application/ld+json">${ld}</script>
   <style>
