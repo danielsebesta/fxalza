@@ -22,7 +22,7 @@ const UA = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)";
 const PRODUCTS = [
   { id: "13067221", label: "Epson EcoTank L4360" },
   { id: "13450080", label: "Google Pixel 11" },
-  { id: "12978903", label: "Acer Predator" },
+  { id: "7356338", label: "Govee LED pásek" },
   { id: "5509713", label: "AlzaPower kabel" },
 ];
 const KIND_LABEL = { sale: "sleva", coupon: "slevový kód", cashback: "cashback", tradein: "výkupní bonus", alzaplus: "AlzaPlus+", promo: "akční cena", tier: "klubové ceny" };
