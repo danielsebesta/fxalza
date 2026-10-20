@@ -127,6 +127,7 @@ export function landingHtml(host: string, disclaimer: string): string {
     a{color:var(--a);text-underline-offset:3px}
     header{text-align:center;margin-bottom:2.8rem}
     h1{font-size:clamp(2.6rem,10vw,3.8rem);line-height:1.05;letter-spacing:-.035em;font-weight:700;color:var(--head);margin:0 0 1rem}
+    .logo{display:block;width:4.5rem;height:4.5rem;margin:0 auto 1.4rem}
     .sub{font-size:1.25rem;line-height:1.45;color:var(--muted);margin:0 auto;max-width:28rem}
     h2{font-size:1.5rem;line-height:1.25;letter-spacing:-.012em;font-weight:700;color:var(--head);margin:3rem 0 .5rem}
     p,ul,ol{margin:1rem 0}
@@ -158,6 +159,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 </head>
 <body>
 <header>
+  <img class="logo" src="/favicon.svg" width="72" height="72" alt="">
   <h1>fxalza</h1>
   <p class="sub">Náhledy odkazů z Alzy v Discordu</p>
 </header>
