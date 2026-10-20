@@ -147,7 +147,6 @@ async function renderProduct(p) {
     body = body.replaceAll(`https://cdn.discordapp.com/emojis/${id}.png`, `data:image/png;base64,${emojiPng[name]}`);
   }
   body = body.replaceAll("https://cdn.discordapp.com/embed/avatars/0.png", AVATAR);
-  body = body.replaceAll("https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4c8.svg", CHART_ICON);
   body = body.replace(/(class="discord-message-timestamp"[^>]*>(?:<!--[^>]*-->)?)[^<]+/, "$1dnes");
   body = body.replace(/ url="data:[^"]*"/g, "");
   return { styles, body };
@@ -157,12 +156,6 @@ const emojiIds = JSON.parse(readFileSync(new URL("../assets/emoji/ids.json", imp
 const emojiPng = Object.fromEntries(
   Object.keys(emojiIds).map((n) => [n, readFileSync(new URL(`../assets/emoji/small/${n}.png`, import.meta.url)).toString("base64")]),
 );
-const CHART_ICON =
-  "data:image/svg+xml;utf8," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36"><rect x="3" y="3" width="30" height="30" rx="4" fill="#f4f4f4"/>' +
-      '<path d="M6 27L14 17L20 22L30 9M24 9H30V15" fill="none" stroke="#dd2e44" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  );
 const AVATAR = "data:image/jpeg;base64," + readFileSync(new URL("../assets/demo/avatar.jpg", import.meta.url)).toString("base64");
 
 const products = [];
