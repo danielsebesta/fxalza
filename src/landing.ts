@@ -264,8 +264,9 @@ export function landingHtml(host: string, disclaimer: string): string {
     header{text-align:center;margin-bottom:2.8rem}
     h1{font-size:clamp(2.6rem,10vw,3.8rem);line-height:1.05;letter-spacing:-.035em;font-weight:700;color:var(--head);margin:0 0 1rem}
     .logo{display:block;width:5rem;height:5rem;margin:0 auto .5rem}
-    h1 span{color:#0f6fc5}
     .fx{color:#0f6fc5;font-weight:700}
+    h1 .tld{color:#4b515b}
+    @media (prefers-color-scheme:light){h1 .tld{color:#b4b8be}}
     .sub{font-size:1.25rem;line-height:1.45;color:var(--muted);margin:0 auto;max-width:28rem}
     h2{font-size:1.5rem;line-height:1.25;letter-spacing:-.012em;font-weight:700;color:var(--head);margin:3rem 0 .5rem}
     figure{margin:2.2rem -.5rem}
@@ -294,7 +295,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 <body>
 <header>
   <img class="logo" src="/favicon.svg" width="80" height="80" alt="">
-  <h1><span>fx</span>alza</h1>
+  <h1><span class="fx">fx</span>alza<span class="tld">.cz</span></h1>
   <p class="sub">Náhledy odkazů z Alzy na Discordu</p>
 </header>
 
