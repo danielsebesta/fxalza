@@ -175,9 +175,9 @@ const fixes =
   "<style>" +
   ".discord-embed-custom-emoji-image{width:1.375rem!important;height:1.375rem!important;vertical-align:bottom}" +
   ".discord-v2-container a{font-weight:inherit}" +
-  ".discord-messages,.discord-messages *{font-family:\"gg sans Normal\",\"Noto Sans\",\"Helvetica Neue\",Helvetica,Arial,sans-serif!important;transition:none!important}" +
-  ".discord-messages strong,.discord-messages b,.discord-messages discord-bold,.discord-messages discord-bold *,.discord-messages [style*=\"font-weight: 700\"],.discord-messages [style*=\"font-weight: 700\"] *{font-family:\"gg sans\",\"Noto Sans\",\"Helvetica Neue\",Helvetica,Arial,sans-serif!important;font-weight:700}" +
-  ".discord-messages .discord-author-username,.discord-messages .discord-button,.discord-messages .discord-button *{font-family:\"gg sans SemiBold\",\"Noto Sans\",\"Helvetica Neue\",Helvetica,Arial,sans-serif!important;font-weight:600}" +
+  ".discord-messages,.discord-messages *{font-family:\"gg sans Normal\",system-ui,\"Helvetica Neue\",Helvetica,Arial,sans-serif!important;transition:none!important}" +
+  ".discord-messages strong,.discord-messages b,.discord-messages discord-bold,.discord-messages discord-bold *,.discord-messages [style*=\"font-weight: 700\"],.discord-messages [style*=\"font-weight: 700\"] *{font-family:\"gg sans\",system-ui,\"Helvetica Neue\",Helvetica,Arial,sans-serif!important;font-weight:700}" +
+  ".discord-messages .discord-author-username,.discord-messages .discord-button,.discord-messages .discord-button *{font-family:\"gg sans SemiBold\",system-ui,\"Helvetica Neue\",Helvetica,Arial,sans-serif!important;font-weight:600}" +
   ".discord-messages{min-height:0!important;padding:0!important;margin:0!important;border:0!important;border-radius:0!important;background:transparent!important}" +
   ".discord-messages .discord-message{padding:0!important;margin:0!important;background:transparent!important}" +
   ".discord-messages .discord-v2-container{margin:0!important;max-width:none!important}" +

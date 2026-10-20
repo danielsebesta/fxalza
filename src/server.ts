@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fetchProduct, slugTitle, stopSidecar, type BenefitEntry, type ProductData } from "./alza.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
-import { FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
+import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml } from "./landing.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -301,7 +301,7 @@ function sendStatic(
 }
 
 const FONTS = new Map<string, Buffer>();
-for (const family of ["roboto", "noto-sans"]) {
+for (const family of ["roboto"]) {
   for (const part of ["latin", "latin-ext"]) {
     try {
       FONTS.set(`/fonts/${family}-${part}.woff2`, readFileSync(new URL(`../assets/fonts/${family}-${part}-wght-normal.woff2`, import.meta.url)));
@@ -364,6 +364,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === "/robots.txt") {
       sendStatic(req, res, ROBOTS_TXT, "text/plain; charset=utf-8", { "x-robots-tag": "all" }, 3600);
+      return;
+    }
+    if (u.pathname === "/demo") {
+      sendStatic(req, res, DEMO_HTML, "text/html; charset=utf-8", { "content-security-policy": DEMO_CSP, "x-frame-options": "SAMEORIGIN", "x-robots-tag": "noindex" }, 600);
       return;
     }
     if (u.pathname === "/sitemap.xml") {
