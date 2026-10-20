@@ -185,6 +185,19 @@ const fixes =
   ".discord-messages .discord-author-username{color:#dcdcdf!important}" +
   ".discord-messages .discord-message-timestamp{color:#73747d!important}" +
   ".discord-messages{--discord-message-bg:#000!important;color:#d4d5d8}" +
+  "@media (prefers-color-scheme:light){" +
+  ".discord-messages .discord-v2-container{background-color:#f2f3f5!important;box-shadow:inset 0 0 0 1px #e1e2e6}" +
+  ".discord-messages .discord-text-display{color:#313338!important}" +
+  ".discord-messages [style*=\"color: #d4d5d8\"]{color:#313338!important}" +
+  ".discord-messages [style*=\"color: #dcdcdf\"]{color:#060607!important}" +
+  ".discord-messages [style*=\"color: #949ba4\"]{color:#5c5e66!important}" +
+  ".discord-messages .discord-separator>div{background-color:#dcdde1!important}" +
+  ".discord-messages .discord-button{background-color:#e3e5e8!important;color:#060607!important}" +
+  ".discord-messages a:not(.discord-button){color:#006ce7!important}" +
+  ".discord-messages .discord-author-username{color:#060607!important}" +
+  ".discord-messages .discord-message-timestamp{color:#5c5e66!important}" +
+  ".discord-messages{--discord-message-bg:#fff!important;color:#313338}" +
+  "}" +
   "</style>";
 const n = products.length;
 const each = (fn) => products.map((_, i) => fn(i)).join(",");
@@ -210,7 +223,7 @@ const html =
     .map(
       (p, i) =>
         `<div class="panel"><div class="demo" role="img" aria-label="Ukázka: zpráva na Discordu s odkazem na produkt ${p.label} a kartou s cenou a výhodami">${rendered[i].body}</div>` +
-        `<figcaption>Ukazuje: ${p.kinds.map((k) => KIND_LABEL[k]).join(", ")} · ceny z ${fmtDate}</figcaption></div>`,
+        `</div>`,
     )
     .join("") +
   `</div></div>`;

@@ -126,7 +126,7 @@ code{font:.8em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:v
 
 const DEMO_CSS = `.demo{background:#000;border:1px solid #1a1a1d;padding:16px;border-radius:12px;overflow:hidden;pointer-events:none;user-select:none;color:#d4d5d8}
 .demo code{background:#141417;color:#d4d5d8;padding:.1em .3em;border-radius:4px;font-size:.85em}
-figcaption{font:.82rem var(--sans);color:var(--muted);text-align:center;margin-top:.8rem}
+@media (prefers-color-scheme:light){.demo{background:#fff;border-color:#e3e5e8;color:#313338}.demo code{background:#e3e5e8;color:#313338}}
 @media (max-width:36rem){.demo{padding:10px;border-radius:10px}}`;
 
 export const DEMO_CSP = [
