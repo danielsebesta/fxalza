@@ -24,13 +24,12 @@ interface Parsed {
 }
 
 function parseProductPath(pathname: string): Parsed | null {
-  const m1 = pathname.match(/^(\/[A-Za-z0-9._/-]*-d(\d+)\.htm)$/i);
-  if (m1) return { id: m1[2]!, path: m1[1]! };
-  const m2 = pathname.match(/^\/d(\d+)\/?$/i);
-  if (m2) return { id: m2[1]!, path: `/-d${m2[1]}.htm` };
-  const m3 = pathname.match(/^\/(\d+)\/?$/);
-  if (m3) return { id: m3[1]!, path: `/-d${m3[1]}.htm` };
-  return null;
+  const slug = pathname.match(/^(\/[A-Za-z0-9._~%/-]*?-d(\d{1,12}))(?:\.[A-Za-z0-9]+)?\/?$/i);
+  if (slug) return { id: slug[2]!, path: `${slug[1]}.htm` };
+  const bare = pathname.match(/^\/d?(\d{1,12})\/?$/i);
+  if (bare) return { id: bare[1]!, path: `/-d${bare[1]}.htm` };
+  const any = pathname.match(/-d(\d{1,12})(?!\d)/i);
+  return any ? { id: any[1]!, path: `/-d${any[1]}.htm` } : null;
 }
 
 const ALZA_HOST = /^\/(?:https?:\/+)?((?:[a-z0-9-]+\.)*alza\.(cz|sk|de|at|ch|hu|pl|co\.uk))(\/.*)?$/i;
@@ -211,6 +210,10 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, metaRefr
     img ? `<meta property="og:image:width" content="${IMG_W}">` : "",
     img ? `<meta property="og:image:height" content="${IMG_W}">` : "",
     `<meta property="og:url" content="${esc(canonical)}">`,
+    `<meta property="og:locale" content="cs_CZ">`,
+    img ? `<meta property="og:image:alt" content="${esc(title)}">` : "",
+    p?.price != null ? `<meta property="product:price:amount" content="${p.price}">` : "",
+    p?.price != null ? `<meta property="product:price:currency" content="CZK">` : "",
     componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : "",
     metaRefresh ? `<meta http-equiv="refresh" content="0;url=${esc(withUtm(canonical))}">` : "",
     `<meta name="twitter:card" content="${img ? "summary_large_image" : "summary"}">`,
