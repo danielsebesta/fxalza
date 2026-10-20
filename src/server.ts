@@ -176,7 +176,7 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
   const desc = p.description ? mdEsc(p.description) : "";
 
   const build = (lines: string[], withThumb: boolean, withDesc = true): string => {
-    const parts = [titleLine];
+    const parts = ["-# Alza.cz", titleLine];
     if (withDesc && desc) {
       parts.push(desc);
       if (lines.length > 0) parts.push("");
