@@ -288,7 +288,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 <h2>Jak na to</h2>
 <ol>
   <li>Otevři produkt na Alze a zkopíruj odkaz.</li>
-  <li>Nahraď <code>alza.cz</code> za <code>${h}</code>, nebo použij políčko níž.</li>
+  <li>Před <code>alza.cz</code> dopiš <span class="fx">fx</span>. Nic dalšího přepisovat nemusíš, <code>www.</code> i zbytek odkazu klidně zůstanou. Nebo ho nech přepsat v políčku níž.</li>
   <li>Pošli to na Discord. Kdo na odkaz klikne, skončí rovnou na Alze.</li>
 </ol>
 <div class="try">
