@@ -19,6 +19,7 @@ interface Provider {
 }
 
 const COOLDOWN_MS = Number(process.env.FETCH_COOLDOWN_MS ?? 60_000);
+const SIDECAR_COOLDOWN_MS = Number(process.env.SIDECAR_COOLDOWN_MS ?? 10_000);
 const PAID_MIN_TIMEOUT_MS = 20_000;
 const sidecar = new Sidecar();
 
@@ -114,7 +115,7 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
     } catch (e) {
       errors.push(`${p.name}: ${e instanceof Error ? e.message : e}`);
     }
-    downUntil.set(p.name, Date.now() + COOLDOWN_MS);
+    downUntil.set(p.name, Date.now() + (p.name === "sidecar" ? SIDECAR_COOLDOWN_MS : COOLDOWN_MS));
     console.warn(`[fetch] ${p.name} failed for ${url} (${errors[errors.length - 1]}), trying next`);
   }
 
