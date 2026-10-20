@@ -179,40 +179,37 @@ interface BenefitsResult {
 
 const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 1200);
 const LEAN_TIERS = process.env.TIERS_LEAN !== "0";
-const FETCHED_TIERS = LEAN_TIERS ? TIERS.filter((t) => t.name !== "Silver" && t.name !== "Bronze") : TIERS;
+const CLUB_FOLLOWERS = ["Silver", "Bronze"];
+const FIRST_TIERS = LEAN_TIERS ? TIERS.filter((t) => !CLUB_FOLLOWERS.includes(t.name)) : TIERS;
 
 function clubPriceVisible(t: TierResult | undefined, base: number | null): boolean {
   return !!t && !t.hidden && !!t.main && !!t.selected && base !== null && t.main.amount < base - 0.004;
 }
 
-// Sampled 93 products: Silver always priced like ISIC and Bronze like B2B whenever Gold is
-// visible, and all of Silver/ISIC/Bronze were hidden whenever Gold was. So those two are copied.
-export function expandLeanTiers(byTier: Map<string, TierResult>): Map<string, TierResult> {
-  const out = new Map(byTier);
-  const base = byTier.get("Basic")?.main?.amount ?? null;
-  if (!clubPriceVisible(byTier.get("Gold"), base)) return out;
-  for (const [from, into] of [["ISIC", "Silver"], ["B2B", "Bronze"]] as const) {
-    const src = byTier.get(from);
-    if (src && !out.has(into)) out.set(into, { ...src, tier: into });
-  }
-  return out;
+// Gold, Silver and Bronze are the club, so Silver and Bronze only have a price when Gold has one
+// (49 of 49 sampled products without a Gold price had none). ISIC and B2B are separate programs
+// with prices of their own, so they are always fetched and never copied into Silver or Bronze.
+export function followerTiers(byTier: Map<string, TierResult>): string[] {
+  if (!LEAN_TIERS) return [];
+  return clubPriceVisible(byTier.get("Gold"), byTier.get("Basic")?.main?.amount ?? null) ? CLUB_FOLLOWERS : [];
 }
 
 async function fetchBenefits(id: string): Promise<BenefitsResult> {
   const byTier = new Map<string, TierResult>();
-  const done = (m: Map<string, TierResult>): BenefitsResult => {
-    const r = buildBenefits(LEAN_TIERS ? expandLeanTiers(m) : m);
-    return { ...r, complete: FETCHED_TIERS.every((t) => m.has(t.name)) };
-  };
-  const all = Promise.all(
-    FETCHED_TIERS.map((t) =>
-      fetchTier(id, t)
-        .then((r) => {
-          if (r) byTier.set(r.tier, r);
-        })
-        .catch(() => {}),
-    ),
-  );
+  const load = (t: TierDef): Promise<void> =>
+    fetchTier(id, t)
+      .then((r) => {
+        if (r) byTier.set(r.tier, r);
+      })
+      .catch(() => {});
+  const done = (m: Map<string, TierResult>): BenefitsResult => ({
+    ...buildBenefits(m),
+    complete: FIRST_TIERS.every((t) => m.has(t.name)) && followerTiers(m).every((n) => m.has(n)),
+  });
+  const all = (async () => {
+    await Promise.all(FIRST_TIERS.map(load));
+    await Promise.all(TIERS.filter((t) => followerTiers(byTier).includes(t.name)).map(load));
+  })();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const inTime = await Promise.race([
     all.then(() => true),
@@ -223,7 +220,7 @@ async function fetchBenefits(id: string): Promise<BenefitsResult> {
   clearTimeout(timer);
   if (inTime) return done(byTier);
   const early = done(new Map(byTier));
-  console.log(`[benefits] ${id} ${byTier.size}/${FETCHED_TIERS.length} tiers after ${TIER_SOFT_MS}ms, the rest follows`);
+  console.log(`[benefits] ${id} ${byTier.size} tiers after ${TIER_SOFT_MS}ms, the rest follows`);
   return { ...early, later: all.then(() => done(byTier)) };
 }
 
