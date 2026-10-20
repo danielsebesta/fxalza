@@ -192,7 +192,7 @@ function mdEsc(s: string): string {
 
 function benefitLine(e: BenefitEntry, custom = false): string {
   const shownPercent = e.percentShown ?? (e.percent === null ? null : Math.round(e.percent));
-  const pct = shownPercent !== null && shownPercent >= 1 ? ` (−${shownPercent} %)` : "";
+  const pct = shownPercent !== null && shownPercent > 0 ? ` (−${String(shownPercent).replace(".", ",")} %)` : "";
   const was = e.wasPriceText ? `${e.wasPriceText} → ` : "";
   const name = e.note ? `${e.label} + ${e.note}` : e.label;
   if (!custom) return `${benefitEmoji(e, false)} ${name} ${was}${e.priceText}${pct}`;

@@ -310,7 +310,7 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
       price: r.best,
       priceText: fmtCzk2(r.best),
       percent: percent(r.best),
-      percentShown: shown(r.best),
+      percentShown: base && base > r.best ? Math.round(((base - r.best) / base) * 1000) / 10 : null,
       ...(r.promo ? { wasPriceText: fmtCzk2(r.listPrice), note: promoTag(r.promo) } : {}),
     });
   }
