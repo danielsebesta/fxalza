@@ -21,8 +21,7 @@ function read(rel: string, enc: BufferEncoding = "utf8"): string {
 const DEMO = read("./landing-demo.html");
 
 export const FAVICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#0f6fc5"/>' +
-  '<text x="32" y="42" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="800" font-size="28" fill="#fff">fx</text></svg>';
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 136 136" shape-rendering="crispEdges"><g fill="#0f6fc5"><path d="M97.46 64.08V37.3H84.04V23.9H70.65v13.4H57.26V23.9H43.87v13.4H30.48v26.78H17.09v13.39h13.39v13.4h13.39v13.38h13.39V90.87h13.39v13.38h13.39V90.87h13.42v-13.4h13.37V64.08H97.46zm-40.21 0H43.86V50.69h13.39v13.39zm26.78 0H70.64V50.69h13.39v13.39z"/><path d="M30.47 104.24h13.39v13.39H30.47z"/><path d="M84.04 104.24h13.39v13.39H84.04z"/><path d="M30.48 10.51h13.39V23.9H30.48z"/><path d="M84.04 10.51h13.39V23.9H84.04z"/><path d="M110.82 37.29h13.4v26.8h-13.4z"/><path d="M3.7 37.28h13.4v26.8H3.7z"/></g></svg>';
 
 const SCRIPT = `(function () {
   var input = document.getElementById("in"), out = document.getElementById("out"), copy = document.getElementById("copy");
