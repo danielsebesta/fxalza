@@ -325,7 +325,7 @@ export function landingHtml(host: string, disclaimer: string): string {
 <h2>Poděkování</h2>
 <ul class="credits">
   <li><a href="https://github.com/FxEmbed/FxEmbed" rel="noopener">FxEmbed</a> (MIT) - inspirace a rozpoznávání botů</li>
-  <li><a href="https://github.com/DeRus0/Alza-Benefit-Prices" rel="noopener">Alza-Benefit-Prices</a> - inspirace pro celý projekt a jeho logiku, hlavně klubové ceny a kupóny</li>
+  <li><a href="https://github.com/dexnis-dev/Alza-Benefit-Prices" rel="noopener">Alza-Benefit-Prices</a> - inspirace pro celý projekt a jeho logiku, hlavně klubové ceny a kupóny</li>
   <li><a href="https://github.com/lukabudik/alza-mcp-community" rel="noopener">alza-mcp-community</a> (MCP server pro Alzu) - inspirace v tom, jak s Alzou komunikovat, a nápad s <code>utm_source</code></li>
   <li><a href="https://www.hlidacshopu.cz" rel="noopener">Hlídač shopů</a> - historie cen na tlačítku v náhledu</li>
 </ul>
