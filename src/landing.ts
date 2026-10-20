@@ -77,8 +77,14 @@ export const LANDING_CSP = [
 const FONT_CSS = `@font-face{font-family:"Roboto";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/roboto-latin-ext.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
 @font-face{font-family:"Roboto";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/roboto-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}`;
 
-const BASE_CSS = `:root{color-scheme:dark;--bg:#07090d;--glow:radial-gradient(ellipse 60rem 26rem at 50% 0,rgba(15,111,197,.26),transparent 70%);--fg:#e7e7e7;--head:#fff;--muted:#8b8b8b;--line:#222;--a:#7cb7ff;--chip:#141414;--text:"Roboto",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--sans:var(--text)}
-@media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#fcfcfb;--glow:linear-gradient(transparent,transparent);--fg:#222;--head:#000;--muted:#777;--line:#e4e4e0;--a:#1d62d6;--chip:#f0f0ec}}
+const MESH_CSS = `html{background:var(--bg);min-height:100%}
+html::before{content:"";position:fixed;inset:-25%;z-index:-1;pointer-events:none;background:radial-gradient(44% 48% at 16% 12%,rgba(15,111,197,.78),transparent 70%),radial-gradient(38% 44% at 84% 8%,rgba(124,82,255,.56),transparent 70%),radial-gradient(34% 30% at 50% 2%,rgba(56,140,255,.4),transparent 70%),radial-gradient(42% 40% at 74% 58%,rgba(0,190,214,.36),transparent 70%),radial-gradient(40% 44% at 8% 74%,rgba(15,111,197,.44),transparent 70%),radial-gradient(34% 38% at 92% 94%,rgba(236,72,153,.3),transparent 70%);filter:blur(56px) saturate(1.2);animation:mesh 32s ease-in-out infinite alternate}
+@keyframes mesh{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.1)}}
+@media (prefers-color-scheme:light){html::before{opacity:.45}}
+@media (prefers-reduced-motion:reduce){html::before{animation:none}}`;
+
+const BASE_CSS = `:root{color-scheme:dark;--bg:#07090d;--fg:#e7e7e7;--head:#fff;--muted:#8b8b8b;--line:#222;--a:#7cb7ff;--chip:#141414;--text:"Roboto",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--sans:var(--text)}
+@media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#fcfcfb;--fg:#222;--head:#000;--muted:#777;--line:#e4e4e0;--a:#1d62d6;--chip:#f0f0ec}}
 *{box-sizing:border-box}
 a{color:var(--a);text-underline-offset:3px}
 p,ul,ol{margin:1rem 0}
@@ -161,7 +167,7 @@ export function problemHtml(title: string, message: string): string {
 <style>
 ${FONT_CSS}
 ${BASE_CSS}
-html{background:var(--glow) no-repeat,var(--bg);min-height:100%}
+${MESH_CSS}
 body{max-width:34rem;margin:0 auto;padding:6rem 1.25rem 3rem;color:var(--fg);font:17px/1.7 var(--text);text-align:center;-webkit-font-smoothing:antialiased}
 .logo{display:block;width:4rem;height:4rem;margin:0 auto 1rem}
 h1{font-size:1.8rem;line-height:1.25;letter-spacing:-.02em;color:var(--head);margin:0 0 .8rem}
@@ -226,7 +232,7 @@ export function landingHtml(host: string, disclaimer: string): string {
   <style>
     ${FONT_CSS}
     ${BASE_CSS}
-    html{background:var(--glow) no-repeat,var(--bg);min-height:100%}
+    ${MESH_CSS}
     body{max-width:36rem;margin:0 auto;padding:4.5rem 1.25rem 3rem;color:var(--fg);font:17px/1.7 var(--text);-webkit-font-smoothing:antialiased}
     header{text-align:center;margin-bottom:2.8rem}
     h1{font-size:clamp(2.6rem,10vw,3.8rem);line-height:1.05;letter-spacing:-.035em;font-weight:700;color:var(--head);margin:0 0 1rem}
