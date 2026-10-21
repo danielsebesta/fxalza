@@ -1,3 +1,4 @@
+import "./logfile.ts";
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import { fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
