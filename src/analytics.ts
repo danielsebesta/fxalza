@@ -3,8 +3,9 @@ const WEBSITE_ID = process.env.UMAMI_WEBSITE_ID ?? "";
 const ENDPOINT = `${(process.env.UMAMI_URL ?? "https://cloud.umami.is").replace(/\/+$/, "")}/api/send`;
 const HOSTNAME = new URL(process.env.PUBLIC_URL ?? "https://fxalza.cz").hostname;
 const MAX_IN_FLIGHT = 50;
-// Umami drops requests whose user agent looks like a bot, so crawlers are reported under this one and their real name goes into the event data.
-const SERVER_UA = "Mozilla/5.0 (compatible; fxalza-server/1.0)";
+// Umami drops requests whose user agent looks like a bot (isbot), so crawlers are reported under this one and their real name goes into the event data.
+// "compatible; ...", a bare product token or the word "server" all trip isbot, an X11 platform string with a product token does not.
+const SERVER_UA = "Mozilla/5.0 (X11; Linux x86_64) fxalza/1.0";
 
 const PLATFORMS: [RegExp, string][] = [
   [/Discordbot/i, "discord"],
