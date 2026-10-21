@@ -725,8 +725,25 @@ process.on("uncaughtException", (e) => {
   process.exit(1);
 });
 
+// The first requests through a cold sidecar get 403 from Alza and push the first real embed past its deadline, so a couple of products are fetched once the server is up.
+// They are the ones of the landing page demo, so those links come out of a fresh cache too. WARMUP_IDS= (empty) turns it off.
+const WARMUP_IDS = (process.env.WARMUP_IDS ?? "13067221,7356338").split(",").map((s) => s.trim()).filter(Boolean);
+
+async function warmUp(): Promise<void> {
+  for (const id of WARMUP_IDS) {
+    const started = Date.now();
+    try {
+      await refresh(id, `/-d${id}.htm`);
+      console.log(`[warmup] ${id} ok in ${Date.now() - started}ms`);
+    } catch (e) {
+      console.log(`[warmup] ${id} failed after ${Date.now() - started}ms: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`[server] fxalza listening on http://${HOST}:${PORT}`);
+  void warmUp();
 });
 
 process.once("SIGINT", () => {
