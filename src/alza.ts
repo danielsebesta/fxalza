@@ -1,5 +1,6 @@
 import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
+import { parseProductPath, type Parsed } from "./parse.ts";
 
 export { stopSidecar } from "./fetcher.ts";
 
@@ -406,6 +407,16 @@ function extractProductJsonLd(html: string): any | null {
     }
   }
   return null;
+}
+
+// Alza redirects a bare slug such as /gaming/hogwarts-legacy to one concrete product page; its JSON-LD names the canonical -d<id> link.
+export async function resolveProductPath(path: string): Promise<Parsed | null> {
+  const p = extractProductJsonLd(await getHtml(path));
+  if (!p) return null;
+  const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
+  const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
+  const url = claimed && httpsUrlOn(claimed, "alza.cz");
+  return url ? parseProductPath(new URL(url).pathname) : null;
 }
 
 function fmtCzk(n: number): string {

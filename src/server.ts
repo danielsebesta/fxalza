@@ -1,6 +1,6 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { fetchProduct, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
+import { fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
 import { platformOf, track, type TrackEvent } from "./analytics.ts";
 import { hasCacheBustSuffix, parseProductPath, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
@@ -143,6 +143,37 @@ async function getProduct(id: string, path: string, who: Requester, bust = false
     const missing = e instanceof UpstreamError && (e.status === 404 || e.status === 410);
     return { data: old, stale: old !== null, missing: missing && old === null };
   }
+}
+
+const SLUG_TTL_MS = 6 * 3600_000;
+const SLUG_MISS_TTL_MS = 10 * 60_000;
+const SLUG_MAX = 2000;
+const slugs = new Map<string, { until: number; parsed: Parsed | null }>();
+const slugPending = new Map<string, Promise<Parsed | null>>();
+
+// A path with no product id (e.g. /gaming/hogwarts-legacy) may still be an Alza link that redirects to one product, so crawlers get one upstream look at it.
+async function resolveSlug(pathname: string, who: Requester): Promise<Parsed | null> {
+  if (!/^\/[A-Za-z0-9._~%/-]{2,200}$/.test(pathname) || /\.(?!htm$)[A-Za-z0-9]{1,5}$/i.test(pathname)) return null;
+  const known = slugs.get(pathname);
+  if (known && known.until > Date.now()) return known.parsed;
+  const pending = slugPending.get(pathname);
+  if (pending) return pending;
+  if (!allowFetch(who.id, rateTier(who))) return null;
+  const p = resolveProductPath(pathname)
+    .catch((e) => {
+      console.warn(`[slug] ${pathname} not resolved: ${e instanceof Error ? e.message : e}`);
+      return null;
+    })
+    .then((parsed) => {
+      slugs.delete(pathname);
+      slugs.set(pathname, { until: Date.now() + (parsed ? SLUG_TTL_MS : SLUG_MISS_TTL_MS), parsed });
+      while (slugs.size > SLUG_MAX) slugs.delete(slugs.keys().next().value!);
+      if (parsed) console.log(`[slug] ${pathname} -> ${parsed.id}`);
+      return parsed;
+    })
+    .finally(() => slugPending.delete(pathname));
+  slugPending.set(pathname, p);
+  return p;
 }
 
 function sendProblem(
@@ -535,7 +566,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     }
-    const parsed = parseProductPath(pathname, u.searchParams.get("dq"));
+    let parsed = parseProductPath(pathname, u.searchParams.get("dq"));
+    if (!parsed && isBot) parsed = await resolveSlug(pathname, who);
     if (!parsed) {
       if (pathname === "/" && !alza) {
         if (!isBot) evt = { url: "/", data: visitorData(req, who) };
