@@ -8,8 +8,44 @@ const GLOBAL_PER_MIN = Number(process.env.RATE_GLOBAL_PER_MIN ?? 45);
 const OTHER_GLOBAL_PER_MIN = Number(process.env.RATE_OTHER_GLOBAL_PER_MIN ?? 6);
 const STORE_MAX = 10_000;
 const DISCORD_UA = /Discordbot/i;
+const TELEGRAM_UA = /TelegramBot/i;
 const DISCORD_RANGES_URL = process.env.DISCORD_IPRANGES_URL ?? "https://cdn.discordapp.com/ipranges/discord.json";
+const TELEGRAM_RANGES_URL = process.env.TELEGRAM_CIDR_URL ?? "https://core.telegram.org/resources/cidr.txt";
 const DISCORD_IPS_STRICT = process.env.DISCORD_IPS_STRICT !== "0";
+
+// Fallback until the first successful download, and when Telegram's list is unreachable.
+const TELEGRAM_CIDRS = [
+  "91.108.4.0/22", "91.108.8.0/22", "91.108.12.0/22", "91.108.16.0/22", "91.108.20.0/22", "91.108.56.0/22",
+  "91.105.192.0/23", "149.154.160.0/20", "185.76.151.0/24",
+  "2001:b28:f23c::/48", "2001:b28:f23d::/48", "2001:b28:f23f::/48", "2001:67c:4e8::/48", "2a0a:f280::/32",
+];
+
+function buildRanges(cidrs: string[]): { list: BlockList; count: number } {
+  const list = new BlockList();
+  let count = 0;
+  for (const cidr of cidrs) {
+    const [address, bits] = cidr.trim().split("/");
+    if (!address || !bits || !isIP(address)) continue;
+    list.addSubnet(address, Number(bits), isIP(address) === 4 ? "ipv4" : "ipv6");
+    count++;
+  }
+  return { list, count };
+}
+
+let telegramRanges: BlockList = buildRanges(TELEGRAM_CIDRS).list;
+
+async function loadTelegramRanges(): Promise<void> {
+  try {
+    const res = await fetch(TELEGRAM_RANGES_URL, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const { list, count } = buildRanges((await res.text()).split("\n"));
+    if (count === 0) throw new Error("no prefixes");
+    telegramRanges = list;
+    console.log(`[telegram] loaded ${count} address ranges`);
+  } catch (e) {
+    console.warn(`[telegram] address ranges not refreshed, keeping previous: ${e instanceof Error ? e.message : e}`);
+  }
+}
 
 let discordRanges: BlockList | null = null;
 
@@ -38,9 +74,15 @@ async function loadDiscordRanges(): Promise<void> {
 
 void loadDiscordRanges();
 setInterval(() => void loadDiscordRanges(), 6 * 3600_000).unref();
+void loadTelegramRanges();
+setInterval(() => void loadTelegramRanges(), 6 * 3600_000).unref();
 
 function listedAsDiscord(ip: string): boolean {
   return discordRanges !== null && isIP(ip) > 0 && discordRanges.check(ip, isIP(ip) === 4 ? "ipv4" : "ipv6");
+}
+
+function listedAsTelegram(ip: string): boolean {
+  return isIP(ip) > 0 && telegramRanges.check(ip, isIP(ip) === 4 ? "ipv4" : "ipv6");
 }
 
 const SECRET = randomBytes(32);
@@ -80,6 +122,8 @@ function rawClientIp(req: http.IncomingMessage): string {
 export interface Requester {
   id: string;
   discord: boolean;
+  telegram: boolean;
+  telegramListed: boolean;
   unlisted: boolean;
 }
 
@@ -88,8 +132,10 @@ export function identify(req: http.IncomingMessage, userAgent: string): Requeste
   const id = createHmac("sha256", SECRET).update(ip).digest("hex").slice(0, 16);
   const listed = listedAsDiscord(ip);
   const claimsDiscord = DISCORD_UA.test(userAgent);
+  const telegram = TELEGRAM_UA.test(userAgent);
+  const telegramListed = telegram && listedAsTelegram(ip);
   const unlisted = claimsDiscord && !listed && discordRanges !== null;
-  return { id, discord: listed || (claimsDiscord && !(DISCORD_IPS_STRICT && discordRanges !== null)), unlisted };
+  return { id, discord: listed || (claimsDiscord && !(DISCORD_IPS_STRICT && discordRanges !== null)), telegram, telegramListed, unlisted };
 }
 
 export function allowFetch(id: string, discord: boolean): boolean {
