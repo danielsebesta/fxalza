@@ -1,7 +1,7 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import { fetchProduct, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
-import { parseProductPath, type Parsed } from "./parse.ts";
+import { hasCacheBustSuffix, parseProductPath, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
@@ -100,10 +100,11 @@ interface ProductResult {
   missing?: boolean;
 }
 
-async function getProduct(id: string, path: string, who: Requester): Promise<ProductResult> {
+async function getProduct(id: string, path: string, who: Requester, bust = false): Promise<ProductResult> {
   const hit = peekCached(id);
   console.log(`[product] ${id} cache ${hit?.state ?? "miss"}`);
-  if (hit?.state === "fresh") return { data: hit.data, stale: false };
+  // A link the user changed on purpose gets another try at a partial result instead of waiting for it to expire.
+  if (hit?.state === "fresh" && !(bust && hit.data.partial)) return { data: hit.data, stale: false };
   const bad = hit?.state === "stale" ? null : recalled(id);
   if (bad) {
     const old = getCached(id, true);
@@ -200,6 +201,8 @@ function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
   return `${benefitEmoji(e, custom)} ${label} ${was}**${e.priceText}**${pct}`;
 }
 
+const PARTIAL_NOTICE = "Některé ceny se nestihly načíst. Připiš za odkaz cokoliv (třeba písmeno) a pošli ho znovu.";
+
 function stateText(p: ProductData): string {
   if (!p.condition) return p.availabilityText;
   return `${p.condition}, ${p.availabilityText.charAt(0).toLowerCase()}${p.availabilityText.slice(1)}`;
@@ -211,7 +214,11 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
   const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale");
   const priceLine =
     p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} Cena **${p.priceText}**` : null;
-  const benefitLines = [...(priceLine ? [priceLine] : []), ...(p.benefits ?? []).map((b) => benefitLine(b, true, customEmoji))];
+  const benefitLines = [
+    ...(priceLine ? [priceLine] : []),
+    ...(p.benefits ?? []).map((b) => benefitLine(b, true, customEmoji)),
+    ...(p.partial ? [`-# ${PARTIAL_NOTICE}`] : []),
+  ];
   const humanUrl = outbound(canonical, carried);
   const historyUrl = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(canonical)}`;
 
@@ -289,6 +296,7 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     if (p.priceText && !offers.some((b) => b.kind === "sale")) parts.push(p.priceText);
     for (const b of customEmoji ? offers : p.benefits ?? []) parts.push(benefitLine(b));
     if (stale) parts.push("data mohou být starší");
+    if (p.partial) parts.push(PARTIAL_NOTICE);
   } else {
     parts.push(missing ? "Tenhle produkt na Alze už nenajdeme, odkaz je nejspíš neplatný." : "Produkt se nepodařilo načíst, zkus odkaz otevřít přímo na Alze.");
   }
@@ -577,7 +585,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who);
+    const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who, hasCacheBustSuffix(pathname));
     if (limited) {
       sendProblem(req, res, isBot, 429, "Moc požadavků najednou", "Náhled se teď načítá pro hodně odkazů. Zkus to prosím za chvíli.", { "retry-after": "60" }, false);
       return;
