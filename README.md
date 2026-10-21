@@ -3,7 +3,7 @@
 
 # fxalza
 
-Open source nástroj, který na Discordu a Telegramu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.
+Open source nástroj, který na Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny. Jinde (Telegram, Slack, Facebook a další) se odkaz také rozbalí, jen jednodušeji, bez barevných ikon a komponent.
 
 Stačí v odkazu přepsat `alza.cz` na `fxalza.cz`:
 
