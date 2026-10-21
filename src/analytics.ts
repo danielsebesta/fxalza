@@ -27,6 +27,7 @@ export interface TrackEvent {
   visitorUa?: string;
   referrer?: string;
   language?: string;
+  country?: string;
 }
 
 let inFlight = 0;
@@ -37,7 +38,12 @@ export function track(e: TrackEvent): void {
   inFlight++;
   fetch(ENDPOINT, {
     method: "POST",
-    headers: { "content-type": "application/json", "user-agent": e.visitorUa || SERVER_UA },
+    headers: {
+      "content-type": "application/json",
+      "user-agent": e.visitorUa || SERVER_UA,
+      // Umami reads the CDN country header before it looks the address up, so no address has to be sent for the Countries report.
+      ...(e.country ? { "cf-ipcountry": e.country } : {}),
+    },
     body: JSON.stringify({
       type: "event",
       payload: {

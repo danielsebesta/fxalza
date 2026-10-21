@@ -662,7 +662,7 @@ const server = http.createServer(async (req, res) => {
       track({
         ...evt,
         data: { ...evt.data, status: res.statusCode, ms },
-        ...(isBot ? {} : { visitorUa: ua, referrer: String(req.headers.referer ?? ""), language: String(req.headers["accept-language"] ?? "").split(",")[0] }),
+        ...(isBot ? {} : { visitorUa: ua, referrer: String(req.headers.referer ?? ""), language: String(req.headers["accept-language"] ?? "").split(",")[0], country: evt.data?.country as string | undefined }),
       });
     }
   }
