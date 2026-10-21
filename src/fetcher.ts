@@ -1,3 +1,4 @@
+import { track } from "./analytics.ts";
 import { OverloadedError, Sidecar } from "./sidecar.ts";
 
 export interface FetchResult {
@@ -201,15 +202,19 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
     if (p.name !== "sidecar") {
       if (!paidBudgetLeft()) {
         errors.push(`${p.name}: daily budget of ${PAID_DAILY_MAX} paid requests used up`);
+        track({ url: "/upstream", name: "paid_budget_exhausted", data: { provider: p.name } });
         continue;
       }
       paidUsed++;
     }
     const t = p.name === "sidecar" ? timeoutMs : Math.max(timeoutMs, PAID_MIN_TIMEOUT_MS);
     const started = Date.now();
+    let status = 0;
     try {
       const r = await p.run(url, opts, t);
+      status = r.status;
       if (usable(r.status, r.body)) {
+        track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: true, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
         console.log(`[fetch] ${p.name} ${r.status} ${Date.now() - started}ms ${new URL(url).pathname}${new URL(url).search}`);
         failStreak.set(p.name, 0);
         return { ...r, via: p.name };
@@ -220,6 +225,7 @@ export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<Fetch
       if (e instanceof OverloadedError) throw e;
       errors.push(`${p.name}: ${e instanceof Error ? e.message : e}`);
     }
+    track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: false, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
     const streak = (failStreak.get(p.name) ?? 0) + 1;
     failStreak.set(p.name, streak);
     if (p.name !== "sidecar" || streak >= SIDECAR_STREAK) {

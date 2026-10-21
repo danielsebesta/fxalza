@@ -1,3 +1,4 @@
+import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
 
 export { stopSidecar } from "./fetcher.ts";
@@ -493,6 +494,7 @@ export async function fetchProduct(
   const canonicalUrl = (claimed && httpsUrlOn(claimed, "alza.cz")) || `https://www.alza.cz${path}`;
   if (image && !httpsUrlOn(image, "alza.cz")) image = null;
 
+  const benefitsStarted = Date.now();
   let benefits: BenefitEntry[] = [];
   let partial = true;
   let grace: ReturnType<typeof setTimeout> | undefined;
@@ -506,6 +508,7 @@ export async function fetchProduct(
   if (ready) {
     benefits = ready.b.entries;
     partial = !ready.b.complete;
+    track({ url: "/benefits", name: "benefits", data: { outcome: "in_time", ms: Date.now() - benefitsStarted, entries: ready.b.entries.length, complete: ready.b.complete } });
     void ready.b.later?.then((l) => {
       console.log(`[benefits] ${id} completed late (${l.entries.length})`);
       onLateBenefits?.(l.entries, l.complete);
@@ -516,6 +519,7 @@ export async function fetchProduct(
     void benefitsPromise.then((b) => {
       if (b.entries.length > 0 || b.complete) {
         console.log(`[benefits] ${id} arrived late (${b.entries.length})`);
+        track({ url: "/benefits", name: "benefits", data: { outcome: "late", ms: Date.now() - benefitsStarted, entries: b.entries.length, complete: b.complete } });
         onLateBenefits?.(b.entries, b.complete);
       }
       void b.later?.then((l) => onLateBenefits?.(l.entries, l.complete));

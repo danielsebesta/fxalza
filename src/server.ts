@@ -439,6 +439,16 @@ Disallow: /
 Sitemap: ${PUBLIC_URL}/sitemap.xml
 `;
 
+function hostOf(req: http.IncomingMessage): string {
+  return String(req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase().slice(0, 60);
+}
+
+// Country comes from Cloudflare's header. The visitor id is a keyed hash of the address that changes whenever the server restarts; the address itself is never sent.
+function visitorData(req: http.IncomingMessage, who: Requester): Record<string, string> {
+  const country = String(req.headers["cf-ipcountry"] ?? "").toUpperCase();
+  return { visitor: who.id, host: hostOf(req), ...(/^[A-Z]{2}$/.test(country) ? { country } : {}) };
+}
+
 const server = http.createServer(async (req, res) => {
   for (const [k, v] of Object.entries(BASE_HEADERS)) res.setHeader(k, v);
   const started = Date.now();
@@ -528,7 +538,7 @@ const server = http.createServer(async (req, res) => {
     const parsed = parseProductPath(pathname);
     if (!parsed) {
       if (pathname === "/" && !alza) {
-        if (!isBot) evt = { url: "/" };
+        if (!isBot) evt = { url: "/", data: visitorData(req, who) };
         sendStatic(
           req,
           res,
@@ -586,7 +596,7 @@ const server = http.createServer(async (req, res) => {
     if (!isBot) {
       const known = getCached(parsed.id, true);
       const target = outbound(known?.canonicalUrl ?? `https://www.alza.cz${parsed.path}`, carriedQuery(u.searchParams));
-      evt = { url: `/product/${parsed.id}`, name: "click", data: { product: parsed.id, ...(known ? { name: shortName(known.name, 80) } : {}) } };
+      evt = { url: `/product/${parsed.id}`, name: "click", data: { product: parsed.id, ...(known ? { name: shortName(known.name, 80) } : {}), ...visitorData(req, who) } };
       res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
       return;
@@ -602,7 +612,8 @@ const server = http.createServer(async (req, res) => {
       data: {
         platform: platformOf(ua),
         product: parsed.id,
-        ...(data ? { name: shortName(data.name, 80) } : {}),
+        ...(data ? { name: shortName(data.name, 80), ...(data.brand ? { brand: data.brand } : {}), benefits: data.benefits?.length ?? 0 } : {}),
+        host: hostOf(req),
         state,
         cache: trace.cache ?? "miss",
         tier: rateTier(who),
