@@ -109,7 +109,7 @@ async function getProduct(id: string, path: string, who: Requester): Promise<Pro
     const old = getCached(id, true);
     return { data: old, stale: old !== null, missing: bad.missing && old === null };
   }
-  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, who.discord || who.telegram);
+  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, who.discord || who.telegramListed);
   if (hit?.state === "stale") {
     if (mayFetch()) refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));
     return { data: hit.data, stale: false };
