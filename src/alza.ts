@@ -460,16 +460,18 @@ export async function fetchProduct(
   path: string,
   onLateBenefits?: (benefits: BenefitEntry[], complete: boolean) => void,
 ): Promise<ProductData> {
-  const html = await getHtml(path);
-  const p = extractProductJsonLd(html);
-  if (!p) throw new Error("no Product JSON-LD found on the page");
-
+  const benefitsStarted = Date.now();
+  // The id is already known from the link, so the price tiers load while the page itself is still on its way.
   const benefitsPromise: Promise<BenefitsResult> = BENEFITS_ENABLED
     ? fetchBenefits(id).catch((e) => {
         console.error(`[benefits] ${id}: ${e instanceof Error ? e.message : e}`);
         return { entries: [], complete: false };
       })
     : Promise.resolve({ entries: [], complete: true });
+
+  const html = await getHtml(path);
+  const p = extractProductJsonLd(html);
+  if (!p) throw new Error("no Product JSON-LD found on the page");
 
   const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
 
@@ -505,7 +507,6 @@ export async function fetchProduct(
   const canonicalUrl = (claimed && httpsUrlOn(claimed, "alza.cz")) || `https://www.alza.cz${path}`;
   if (image && !httpsUrlOn(image, "alza.cz")) image = null;
 
-  const benefitsStarted = Date.now();
   let benefits: BenefitEntry[] = [];
   let partial = true;
   let grace: ReturnType<typeof setTimeout> | undefined;
