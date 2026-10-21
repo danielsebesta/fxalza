@@ -7,7 +7,7 @@ import type { Readable, Writable } from "node:stream";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "../sidecar/cf-transport.py");
 
-const WORKERS = Math.max(1, Number(process.env.SIDECAR_WORKERS ?? 3));
+const WORKERS = Math.max(1, Number(process.env.SIDECAR_WORKERS ?? 6));
 const MAX_QUEUE = Math.max(1, Number(process.env.SIDECAR_MAX_QUEUE ?? 200));
 
 type SidecarProc = ChildProcessByStdio<Writable, Readable, null>;
