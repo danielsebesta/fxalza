@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { identify } from "../src/ratelimit.ts";
+import { allowFetch, identify, rateTier } from "../src/ratelimit.ts";
 
 function request(userAgent: string, ip = "127.0.0.1") {
   return {
@@ -23,4 +23,15 @@ test("Telegram gets the higher rate limit only from Telegram's address ranges", 
   const spoofed = identify(request("TelegramBot", "203.0.113.7"), "TelegramBot");
   assert.equal(spoofed.telegram, true);
   assert.equal(spoofed.telegramListed, false);
+});
+
+test("known link-preview crawlers get the crawler tier, unknown clients stay in other", () => {
+  assert.equal(rateTier(identify(request("Slackbot-LinkExpanding 1.0", "203.0.113.7"), "Slackbot-LinkExpanding 1.0")), "crawler");
+  assert.equal(rateTier(identify(request("curl/8", "203.0.113.7"), "curl/8")), "other");
+  assert.equal(rateTier(identify(request("TelegramBot", "149.154.161.5"), "TelegramBot")), "discord");
+});
+
+test("crawler tier is capped globally", () => {
+  const results = Array.from({ length: 12 }, (_, i) => allowFetch(`crawler-${i}`, "crawler"));
+  assert.equal(results.filter(Boolean).length, 10);
 });

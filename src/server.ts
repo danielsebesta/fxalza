@@ -6,7 +6,7 @@ import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml, problemHtml } from "./landing.ts";
-import { allowFetch, identify, type Requester } from "./ratelimit.ts";
+import { allowFetch, identify, rateTier, type Requester } from "./ratelimit.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -109,13 +109,13 @@ async function getProduct(id: string, path: string, who: Requester): Promise<Pro
     const old = getCached(id, true);
     return { data: old, stale: old !== null, missing: bad.missing && old === null };
   }
-  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, who.discord || who.telegramListed);
+  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, rateTier(who));
   if (hit?.state === "stale") {
     if (mayFetch()) refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));
     return { data: hit.data, stale: false };
   }
   if (!mayFetch()) {
-    console.warn(`[rate] ${who.discord ? "discord" : who.telegram ? "telegram" : "other"} ${who.id} limited on ${id}`);
+    console.warn(`[rate] ${rateTier(who)} ${who.id} limited on ${id}`);
     const old = getCached(id, true);
     return old ? { data: old, stale: true } : { data: null, stale: false, limited: true };
   }

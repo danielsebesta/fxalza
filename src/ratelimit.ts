@@ -6,9 +6,13 @@ const DISCORD_PER_MIN = Number(process.env.RATE_DISCORD_PER_MIN ?? 30);
 const OTHER_PER_10MIN = Number(process.env.RATE_OTHER_PER_10MIN ?? 3);
 const GLOBAL_PER_MIN = Number(process.env.RATE_GLOBAL_PER_MIN ?? 45);
 const OTHER_GLOBAL_PER_MIN = Number(process.env.RATE_OTHER_GLOBAL_PER_MIN ?? 6);
+const CRAWLER_PER_MIN = Number(process.env.RATE_CRAWLER_PER_MIN ?? 6);
+const CRAWLER_GLOBAL_PER_MIN = Number(process.env.RATE_CRAWLER_GLOBAL_PER_MIN ?? 10);
 const STORE_MAX = 10_000;
 const DISCORD_UA = /Discordbot/i;
 const TELEGRAM_UA = /TelegramBot/i;
+// Link-preview crawlers with no published address ranges (or none we check), so the user agent is the only signal.
+const CRAWLER_UA = /Slackbot|facebookexternalhit|meta-externalagent|Facebot|WhatsApp|Twitterbot|LinkedInBot/i;
 const DISCORD_RANGES_URL = process.env.DISCORD_IPRANGES_URL ?? "https://cdn.discordapp.com/ipranges/discord.json";
 const TELEGRAM_RANGES_URL = process.env.TELEGRAM_CIDR_URL ?? "https://core.telegram.org/resources/cidr.txt";
 const DISCORD_IPS_STRICT = process.env.DISCORD_IPS_STRICT !== "0";
@@ -89,6 +93,7 @@ const SECRET = randomBytes(32);
 const hits = new Map<string, number[]>();
 let globalHits: number[] = [];
 let otherGlobalHits: number[] = [];
+let crawlerGlobalHits: number[] = [];
 
 setInterval(() => {
   const cutoff = Date.now() - 10 * 60_000;
@@ -124,6 +129,7 @@ export interface Requester {
   discord: boolean;
   telegram: boolean;
   telegramListed: boolean;
+  crawler: boolean;
   unlisted: boolean;
 }
 
@@ -135,19 +141,28 @@ export function identify(req: http.IncomingMessage, userAgent: string): Requeste
   const telegram = TELEGRAM_UA.test(userAgent);
   const telegramListed = telegram && listedAsTelegram(ip);
   const unlisted = claimsDiscord && !listed && discordRanges !== null;
-  return { id, discord: listed || (claimsDiscord && !(DISCORD_IPS_STRICT && discordRanges !== null)), telegram, telegramListed, unlisted };
+  return { id, discord: listed || (claimsDiscord && !(DISCORD_IPS_STRICT && discordRanges !== null)), telegram, telegramListed, crawler: CRAWLER_UA.test(userAgent), unlisted };
 }
 
-export function allowFetch(id: string, discord: boolean): boolean {
+export type RateTier = "discord" | "crawler" | "other";
+
+export function rateTier(who: Requester): RateTier {
+  if (who.discord || who.telegramListed) return "discord";
+  return who.crawler ? "crawler" : "other";
+}
+
+export function allowFetch(id: string, tier: RateTier): boolean {
   const now = Date.now();
   globalHits = globalHits.filter((t) => now - t < 60_000);
   if (globalHits.length >= GLOBAL_PER_MIN) return false;
   otherGlobalHits = otherGlobalHits.filter((t) => now - t < 60_000);
-  if (!discord && otherGlobalHits.length >= OTHER_GLOBAL_PER_MIN) return false;
+  if (tier === "other" && otherGlobalHits.length >= OTHER_GLOBAL_PER_MIN) return false;
+  crawlerGlobalHits = crawlerGlobalHits.filter((t) => now - t < 60_000);
+  if (tier === "crawler" && crawlerGlobalHits.length >= CRAWLER_GLOBAL_PER_MIN) return false;
 
-  const windowMs = discord ? 60_000 : 10 * 60_000;
-  const max = discord ? DISCORD_PER_MIN : OTHER_PER_10MIN;
-  const key = `${discord ? "d" : "o"}:${id}`;
+  const windowMs = tier === "other" ? 10 * 60_000 : 60_000;
+  const max = tier === "discord" ? DISCORD_PER_MIN : tier === "crawler" ? CRAWLER_PER_MIN : OTHER_PER_10MIN;
+  const key = `${tier[0]}:${id}`;
   const list = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
   if (list.length >= max) {
     hits.set(key, list);
@@ -157,7 +172,8 @@ export function allowFetch(id: string, discord: boolean): boolean {
   list.push(now);
   hits.set(key, list);
   globalHits.push(now);
-  if (!discord) otherGlobalHits.push(now);
+  if (tier === "other") otherGlobalHits.push(now);
+  if (tier === "crawler") crawlerGlobalHits.push(now);
   if (hits.size > STORE_MAX) hits.delete(hits.keys().next().value!);
   return true;
 }
