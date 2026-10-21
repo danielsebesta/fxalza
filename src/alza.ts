@@ -67,6 +67,8 @@ export const TIERS: TierDef[] = [
 
 export interface PriceCandidate {
   amount: number;
+  // primaryPrice is whole crowns as printed; Alza works out its discount labels from this exact value
+  exact?: number;
   promo: boolean;
   priceType: number | null;
   name: string;
@@ -106,6 +108,8 @@ function priceCandidate(v: any, promo = false): PriceCandidate | null {
   if (!Number.isFinite(amount)) return null;
   return {
     amount,
+    // only trusted while it agrees with the printed price, anything else is not this price in crowns
+    ...(typeof v.primaryPriceNoCurrency === "number" && Math.abs(v.primaryPriceNoCurrency - amount) <= 1 ? { exact: v.primaryPriceNoCurrency } : {}),
     promo,
     priceType: typeof v.priceType === "number" ? v.priceType : null,
     name: promo && typeof v.name === "string" ? v.name.trim() : "",
@@ -237,6 +241,10 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
     const exact = denominator && denominator > amount ? ((denominator - amount) / denominator) * 100 : null;
     return exact === null ? null : Math.floor(exact + 50 / denominator! + 1e-9);
   };
+  // The club labels on Alza ("Gold Sleva -8 %") cut the exact discount to whole percent, measured from the crossed out price when the product is on sale.
+  const clubBase = basic?.compare && base && basic.compare > base + 0.004 ? basic.compare : (basic?.main?.exact ?? base);
+  const clubShown = (amount: number): number | null =>
+    clubBase && clubBase > amount ? Math.floor(((clubBase - amount) / clubBase) * 100 + 1e-9) : null;
 
   if (basic?.compare && base && basic.compare > base + 0.004) {
     entries.push({
@@ -280,6 +288,7 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
     names: string[];
     listPrice: number;
     best: number;
+    bestExact: number;
     promo: PriceCandidate | null;
   }
   const rows: ClubRow[] = [];
@@ -292,6 +301,7 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
       names: [name],
       listPrice: t.main.amount,
       best: t.selected.amount,
+      bestExact: t.selected.exact ?? t.selected.amount,
       promo: lowered ? t.selected : null,
     });
   }
@@ -300,7 +310,7 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
   for (let i = 0; i < rows.length; i++) {
     for (let j = rows.length - 1; j > i; j--) {
       const x = rows[i]!, y = rows[j]!;
-      if (Math.abs(x.listPrice - y.listPrice) < 0.005 && Math.abs(x.best - y.best) < 0.005) {
+      if (Math.abs(x.listPrice - y.listPrice) < 0.005 && Math.abs(x.best - y.best) < 0.005 && Math.abs(x.bestExact - y.bestExact) < 0.005) {
         x.names = x.names.concat(y.names);
         rows.splice(j, 1);
       }
@@ -316,7 +326,7 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
       price: r.best,
       priceText: fmtCzk2(r.best),
       percent: percent(r.best),
-      percentShown: base && base > r.best ? Math.round(((base - r.best) / base) * 100) : null,
+      percentShown: clubShown(r.bestExact),
       ...(r.promo ? { wasPriceText: fmtCzk2(r.listPrice), note: promoTag(r.promo) } : {}),
     });
   }
