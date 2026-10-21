@@ -124,6 +124,22 @@ function rawClientIp(req: http.IncomingMessage): string {
   return isIP(forwarded) ? normalize(forwarded) : peer;
 }
 
+// Country-level geolocation survives zeroing the host part, and the full address never leaves the process.
+export function anonymizeIp(ip: string): string | undefined {
+  const kind = isIP(ip);
+  if (kind === 4) return ip.replace(/\.\d+$/, ".0");
+  if (kind !== 6) return undefined;
+  const [head = "", tail = ""] = ip.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...front, ...Array<string>(8 - front.length - back.length).fill("0"), ...back] : front;
+  return groups.length === 8 ? `${groups.slice(0, 3).join(":")}::` : undefined;
+}
+
+export function anonymizedIp(req: http.IncomingMessage): string | undefined {
+  return anonymizeIp(rawClientIp(req));
+}
+
 export interface Requester {
   id: string;
   discord: boolean;

@@ -7,7 +7,7 @@ import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml, problemHtml } from "./landing.ts";
-import { allowFetch, identify, rateTier, type Requester } from "./ratelimit.ts";
+import { allowFetch, anonymizedIp, identify, rateTier, type Requester } from "./ratelimit.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -662,7 +662,7 @@ const server = http.createServer(async (req, res) => {
       track({
         ...evt,
         data: { ...evt.data, status: res.statusCode, ms },
-        ...(isBot ? {} : { visitorUa: ua, referrer: String(req.headers.referer ?? ""), language: String(req.headers["accept-language"] ?? "").split(",")[0], country: evt.data?.country as string | undefined }),
+        ...(isBot ? {} : { visitorUa: ua, referrer: String(req.headers.referer ?? ""), language: String(req.headers["accept-language"] ?? "").split(",")[0], ip: anonymizedIp(req) }),
       });
     }
   }

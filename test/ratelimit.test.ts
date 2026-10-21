@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { allowFetch, identify, rateTier } from "../src/ratelimit.ts";
+import { allowFetch, anonymizeIp, identify, rateTier } from "../src/ratelimit.ts";
 
 function request(userAgent: string, ip = "127.0.0.1") {
   return {
@@ -34,4 +34,12 @@ test("known link-preview crawlers get the crawler tier, unknown clients stay in 
 test("crawler tier is capped globally", () => {
   const results = Array.from({ length: 12 }, (_, i) => allowFetch(`crawler-${i}`, "crawler"));
   assert.equal(results.filter(Boolean).length, 10);
+});
+
+test("anonymizeIp zeroes the host part of both address families", () => {
+  assert.equal(anonymizeIp("200.160.12.34"), "200.160.12.0");
+  assert.equal(anonymizeIp("2001:db8:85a3:8d3:1319:8a2e:370:7348"), "2001:db8:85a3::");
+  assert.equal(anonymizeIp("2001:db8::1"), "2001:db8:0::");
+  assert.equal(anonymizeIp("::1"), "0:0:0::");
+  assert.equal(anonymizeIp("not an ip"), undefined);
 });

@@ -27,7 +27,7 @@ export interface TrackEvent {
   visitorUa?: string;
   referrer?: string;
   language?: string;
-  country?: string;
+  ip?: string;
 }
 
 let inFlight = 0;
@@ -38,12 +38,7 @@ export function track(e: TrackEvent): void {
   inFlight++;
   fetch(ENDPOINT, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "user-agent": e.visitorUa || SERVER_UA,
-      // Umami reads the CDN country header before it looks the address up, so no address has to be sent for the Countries report.
-      ...(e.country ? { "cf-ipcountry": e.country } : {}),
-    },
+    headers: { "content-type": "application/json", "user-agent": e.visitorUa || SERVER_UA },
     body: JSON.stringify({
       type: "event",
       payload: {
@@ -54,6 +49,8 @@ export function track(e: TrackEvent): void {
         ...(e.data ? { data: e.data } : {}),
         ...(e.referrer ? { referrer: e.referrer } : {}),
         ...(e.language ? { language: e.language } : {}),
+        // Umami Cloud ignores forwarding headers and geolocates the sender, but takes the address from the payload.
+        ...(e.ip ? { ip: e.ip } : {}),
       },
     }),
     signal: AbortSignal.timeout(5000),
