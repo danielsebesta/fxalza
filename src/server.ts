@@ -3,7 +3,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
 import { platformOf, track, type TrackEvent } from "./analytics.ts";
-import { hasCacheBustSuffix, parseProductPath, type Parsed } from "./parse.ts";
+import { hasCacheBustSuffix, isExtensionHost, parseProductPath, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
@@ -19,6 +19,7 @@ const BOT_RE =
   /(bot|facebook|embed|got|firefox\/92|firefox\/38|chrome\/96\.0\.4664\.110|curl|wget|go-http|yahoo|generator|whatsapp|revoltchat|preview|link|proxy|vkshare|images|analyzer|index|crawl|spider|python|node|deno|mastodon|http\.rb|ruby|bun\/|fiddler|iframely|steamchaturllookup|bluesky|matrix-media-repo|cardyb|resolver|util|feedly|rss|reader|atom|thunderbird|axios)/i;
 const APEX = new URL(PUBLIC_URL).hostname.toLowerCase();
 const SERVED_SUBDOMAINS = new Set(["www", "m"]);
+const EXTENSION_REPO = "https://github.com/dexnis-dev/Alza-Benefit-Prices";
 
 const UTM = "utm_source=fxalza&utm_medium=discord";
 const DISCLAIMER = "Neoficiální nástroj, s Alza.cz a.s. nijak nesouvisí.\n„Alza“ a „Alza.cz“ jsou ochranné známky společnosti Alza.cz a.s.";
@@ -505,6 +506,14 @@ const server = http.createServer(async (req, res) => {
 
     const u = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     logged = u.pathname;
+
+    // The extension subdomains always land on the repository itself, whatever the path or query was.
+    if (isExtensionHost(hostOf(req), APEX)) {
+      evt = { url: "/extension", name: "extension_redirect", data: { host: hostOf(req), kind: isBot ? platformOf(ua) : "human" } };
+      res.writeHead(302, { Location: EXTENSION_REPO, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+      res.end();
+      return;
+    }
 
     const host = String(req.headers.host ?? "").replace(/:d+$/, "").toLowerCase();
     if (!isBot && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {

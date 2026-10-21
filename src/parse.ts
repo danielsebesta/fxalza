@@ -19,3 +19,10 @@ export function parseProductPath(pathname: string, dq?: string | null): Parsed |
   const head = pathname.slice(0, last.index + last[0].length);
   return { id: last[1]!, path: /^\/[A-Za-z0-9._~%/-]*$/.test(head) ? `${head}.htm` : `/-d${last[1]}.htm` };
 }
+
+// Subdomains that send people to the browser extension instead of serving a preview.
+const EXTENSION_SUBDOMAINS = new Set(["rozsireni", "extension", "script", "ext", "prohlizec", "browser"]);
+
+export function isExtensionHost(host: string, apex: string): boolean {
+  return host.endsWith(`.${apex}`) && EXTENSION_SUBDOMAINS.has(host.slice(0, -apex.length - 1));
+}

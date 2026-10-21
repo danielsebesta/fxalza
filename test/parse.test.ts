@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hasCacheBustSuffix, parseProductPath } from "../src/parse.ts";
+import { hasCacheBustSuffix, isExtensionHost, parseProductPath } from "../src/parse.ts";
 
 test("parses slug product paths", () => {
   assert.deepEqual(parseProductPath("/sport/bery-jones-100-g-d10786234.htm"), {
@@ -51,4 +51,15 @@ test("takes the product id from ?dq= when the path has none", () => {
   assert.equal(parseProductPath("/gaming/grand-theft-auto-v-gta-5", null), null);
   assert.equal(parseProductPath("/", "6496142"), null);
   assert.equal(parseProductPath("/neco-d111.htm", "222")?.id, "111");
+});
+
+test("the extension subdomains of the apex are recognised, nothing else is", () => {
+  for (const sub of ["rozsireni", "extension", "script", "ext", "prohlizec", "browser"]) {
+    assert.equal(isExtensionHost(`${sub}.fxalza.cz`, "fxalza.cz"), true, sub);
+  }
+  assert.equal(isExtensionHost("fxalza.cz", "fxalza.cz"), false);
+  assert.equal(isExtensionHost("www.fxalza.cz", "fxalza.cz"), false);
+  assert.equal(isExtensionHost("ext.example.com", "fxalza.cz"), false);
+  assert.equal(isExtensionHost("a.ext.fxalza.cz", "fxalza.cz"), false);
+  assert.equal(isExtensionHost("notext.fxalza.cz", "fxalza.cz"), false);
 });
