@@ -1,5 +1,6 @@
 import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
+import { parseKodList, type KodList } from "./kodlist.ts";
 import { parseProductPath, type Parsed } from "./parse.ts";
 
 export { stopSidecar } from "./fetcher.ts";
@@ -417,6 +418,10 @@ function extractProductJsonLd(html: string): any | null {
     }
   }
   return null;
+}
+
+export async function fetchKodList(pathname: string, requested: number): Promise<KodList | null> {
+  return parseKodList(await getHtml(pathname), requested);
 }
 
 // Alza redirects a bare slug such as /gaming/hogwarts-legacy to one concrete product page; its JSON-LD names the canonical -d<id> link.

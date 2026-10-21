@@ -1,8 +1,9 @@
 import "./logfile.ts";
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
+import { fetchKodList, fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
 import { platformOf, track, type TrackEvent } from "./analytics.ts";
+import { kodCodes, type KodList } from "./kodlist.ts";
 import { hasCacheBustSuffix, isExtensionHost, parseProductPath, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
@@ -176,6 +177,132 @@ async function resolveSlug(pathname: string, who: Requester): Promise<Parsed | n
     .finally(() => slugPending.delete(pathname));
   slugPending.set(pathname, p);
   return p;
+}
+
+const KOD_RE = /^\/kod\/[A-Za-z0-9;]{1,400}$/;
+const KOD_TTL_MS = 10 * 60_000;
+const KOD_MISS_TTL_MS = 2 * 60_000;
+const kodLists = new Map<string, { until: number; list: KodList | null }>();
+const kodPending = new Map<string, Promise<KodList | null>>();
+
+// A "Výpis zboží" page (alza.cz/kod/<code>;<code>...) lists several products in one go, so one fetch covers the whole preview.
+async function getKodList(pathname: string, who: Requester): Promise<KodList | null> {
+  const known = kodLists.get(pathname);
+  if (known && known.until > Date.now()) return known.list;
+  const pending = kodPending.get(pathname);
+  if (pending) return pending;
+  if (!allowFetch(who.id, rateTier(who))) return known?.list ?? null;
+  const p = fetchKodList(pathname, kodCodes(pathname).length)
+    .catch((e) => {
+      console.warn(`[kod] ${pathname} not loaded: ${e instanceof Error ? e.message : e}`);
+      return null;
+    })
+    .then((list) => {
+      kodLists.delete(pathname);
+      kodLists.set(pathname, { until: Date.now() + (list ? KOD_TTL_MS : KOD_MISS_TTL_MS), list });
+      while (kodLists.size > 500) kodLists.delete(kodLists.keys().next().value!);
+      return list;
+    })
+    .finally(() => kodPending.delete(pathname));
+  kodPending.set(pathname, p);
+  return p;
+}
+
+function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: boolean): string {
+  const listUrl = outbound(`https://www.alza.cz${pathname}`, carried);
+  const totalText = `${new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 }).format(list.total).replace(/\u00a0/g, " ")} Kč`;
+  const count = list.items.length;
+  const noun = count === 1 ? "položka" : count < 5 ? "položky" : "položek";
+  const heading = `Výpis zboží: ${count} ${noun}, celkem ${totalText}`;
+  const missing = list.requested > count ? `Alza zobrazila ${count} z ${list.requested} položek.` : "";
+  const line = (i: (typeof list.items)[number], rich: boolean): string => {
+    const price = i.priceText ? (rich ? ` **${i.priceText}**` : ` ${i.priceText}`) : "";
+    const was = i.wasText ? (rich ? ` ~~${i.wasText}~~` : ` (bylo ${i.wasText})`) : "";
+    return rich ? `[${mdEsc(shortName(i.name, 60))}](${outbound(i.url, carried)}) —${price}${was}` : `${shortName(i.name, 60)} –${price}${was}`;
+  };
+  const img = list.items.find((i) => i.image)?.image ?? null;
+  const imgUrl = img ? `${img}?width=${IMG_W}&height=${IMG_W}` : null;
+
+  const bytes = (t: string): number => Buffer.byteLength(t, "utf8");
+  let desc = "";
+  for (const i of list.items) {
+    const next = desc ? `${desc} • ${line(i, false)}` : line(i, false);
+    if (bytes(next) > 330) break;
+    desc = next;
+  }
+  if (missing && bytes(desc) + bytes(missing) + 3 <= 330) desc = `${desc} • ${missing}`;
+
+  const build = (n: number): string => {
+    const shown = list.items.slice(0, n);
+    const rest = count - n;
+    const content = [
+      "-# Alza.cz",
+      `### **Výpis zboží** (${count} ${noun}, celkem **${totalText}**)`,
+      ...shown.map((i) => `- ${line(i, true)}`),
+      ...(rest > 0 ? [`-# … a ${rest} dalších`] : []),
+      ...(missing ? [`-# ${missing}`] : []),
+    ].join("\n");
+    const components: unknown[] = [
+      imgUrl
+        ? { type: 9, components: [{ type: 10, content }], accessory: { type: 11, media: { url: imgUrl } } }
+        : { type: 10, content },
+      { type: 14 },
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style: 5,
+            url: listUrl,
+            label: "Otevřít na Alze",
+            ...(customEmoji && emojiRef("alza_logo") ? { emoji: emojiRef("alza_logo") } : {}),
+          },
+        ],
+      },
+    ];
+    return JSON.stringify({ component: { type: 17, accent_color: 1011653, components } }).replace(/</g, "\\u003c");
+  };
+  let componentJson: string | null = null;
+  for (let n = count; n >= 0 && componentJson === null; n--) {
+    const json = build(n);
+    if (bytes(json) <= 2900) componentJson = json;
+  }
+
+  const tags = [
+    `<meta charset="utf-8">`,
+    `<title>${esc(heading)} | Alza.cz</title>`,
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:site_name" content="Alza.cz">`,
+    `<meta property="og:title" content="${esc(heading)}">`,
+    `<meta name="description" content="${esc(desc)}">`,
+    `<meta property="og:description" content="${esc(desc)}">`,
+    imgUrl ? `<meta property="og:image" content="${esc(imgUrl)}">` : "",
+    `<meta property="og:locale" content="cs_CZ">`,
+    componentJson && customEmoji ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : "",
+    customEmoji ? `<meta http-equiv="refresh" content="0;url=${esc(listUrl)}">` : "",
+    `<meta name="twitter:card" content="${imgUrl ? "summary_large_image" : "summary"}">`,
+    `<meta name="twitter:title" content="${esc(heading)}">`,
+    `<meta name="twitter:description" content="${esc(desc)}">`,
+    imgUrl ? `<meta name="twitter:image" content="${esc(imgUrl)}">` : "",
+    `<meta name="theme-color" content="#0f6fc5">`,
+  ]
+    .filter(Boolean)
+    .join("\n  ");
+  const rows = list.items.map((i) => `<li>${esc(line(i, false))}</li>`).join("");
+  return `<!DOCTYPE html>
+<html lang="cs">
+<head>
+  ${tags}
+  <style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#222}.note{color:#888;font-size:13px}</style>
+</head>
+<body>
+  <h1>${esc(heading)}</h1>
+  <ul>${rows}</ul>
+  ${missing ? `<p>${esc(missing)}</p>` : ""}
+  <p><a href="${esc(listUrl)}">Přejít na Alza.cz</a></p>
+  <p class="note">${DISCLAIMER.replace("\n", " ")}</p>
+</body>
+</html>`;
 }
 
 function sendProblem(
@@ -577,6 +704,24 @@ const server = http.createServer(async (req, res) => {
       }
     }
     let parsed = parseProductPath(pathname, u.searchParams.get("dq"));
+    if (!parsed && KOD_RE.test(pathname)) {
+      const carried = carriedQuery(u.searchParams);
+      if (!isBot) {
+        evt = { url: "/kod", name: "click", data: { kind: "kod_list", ...visitorData(req, who) } };
+        res.writeHead(302, { Location: outbound(`https://www.alza.cz${pathname}`, carried), "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+        res.end();
+        return;
+      }
+      const list = await getKodList(pathname, who);
+      evt = { url: "/kod", name: "embed", data: { kind: "kod_list", platform: platformOf(ua), items: list?.items.length ?? 0, requested: kodCodes(pathname).length, state: list ? "ok" : "error", tier: rateTier(who), host: hostOf(req) } };
+      if (!list) {
+        sendProblem(req, res, isBot, 503, "Výpis se nepodařilo načíst", "Alza teď neodpovídá nebo je moc požadavků. Zkus to prosím za chvíli.", { "retry-after": "30" }, false);
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+      res.end(req.method === "HEAD" ? undefined : kodHtml(list, pathname, carried, !who.telegram));
+      return;
+    }
     if (!parsed && isBot) parsed = await resolveSlug(pathname, who);
     if (!parsed) {
       if (pathname === "/" && !alza) {
