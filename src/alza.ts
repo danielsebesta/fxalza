@@ -307,6 +307,13 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
     });
   }
 
+  // The B2B price group is Bronze plus B2B, so a B2B price equal to Bronze's carries no information of its own.
+  const bronze = rows.find((r) => r.names[0] === "Bronze");
+  const b2b = rows.findIndex((r) => r.names[0] === "B2B");
+  if (bronze && b2b >= 0 && Math.abs(bronze.listPrice - rows[b2b]!.listPrice) < 0.005 && Math.abs(bronze.best - rows[b2b]!.best) < 0.005) {
+    rows.splice(b2b, 1);
+  }
+
   // tiers that end up with the very same price share one line, in the order Gold, Silver, ISIC, Bronze, B2B
   for (let i = 0; i < rows.length; i++) {
     for (let j = rows.length - 1; j > i; j--) {

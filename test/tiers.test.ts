@@ -88,8 +88,12 @@ test("tiers with the very same price share one line in a fixed order, whichever 
   const tier = (name: string, amount: number): TierResult => ({ tier: name, hidden: false, selected: price(amount), main: price(amount), promos: [] });
   const labels = (entries: Record<string, number>): string[] =>
     buildBenefits(new Map([["Basic", tier("Basic", 1000)], ...Object.entries(entries).map(([n, a]) => [n, tier(n, a)] as [string, TierResult])])).entries.map((e) => e.label);
-  assert.deepEqual(labels({ Gold: 900, Silver: 950, ISIC: 950, Bronze: 980, B2B: 980 }), ["Gold", "Silver/ISIC", "Bronze/B2B"]);
+  assert.deepEqual(labels({ Gold: 900, Silver: 950, ISIC: 950, Bronze: 980, B2B: 980 }), ["Gold", "Silver/ISIC", "Bronze"]);
   assert.deepEqual(labels({ Gold: 950, Silver: 950, ISIC: 950, Bronze: 980, B2B: 900 }), ["B2B", "Gold/Silver/ISIC", "Bronze"]);
-  assert.deepEqual(labels({ B2B: 970, Bronze: 970, Silver: 970, Gold: 970, ISIC: 970 }), ["Gold/Silver/ISIC/Bronze/B2B"]);
+  assert.deepEqual(labels({ B2B: 970, Bronze: 970, Silver: 970, Gold: 970, ISIC: 970 }), ["Gold/Silver/ISIC/Bronze"]);
+  // the B2B group is Bronze plus B2B: hidden when it only repeats Bronze, shown when it differs or stands alone
+  assert.deepEqual(labels({ Bronze: 980, B2B: 980 }), ["Bronze"]);
+  assert.deepEqual(labels({ Bronze: 980, B2B: 940 }), ["B2B", "Bronze"]);
+  assert.deepEqual(labels({ B2B: 940 }), ["B2B"]);
   assert.deepEqual(labels({ Silver: 960, Bronze: 960 }), ["Silver/Bronze"]);
 });
