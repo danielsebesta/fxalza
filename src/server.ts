@@ -476,7 +476,7 @@ const server = http.createServer(async (req, res) => {
 
     const host = String(req.headers.host ?? "").replace(/:d+$/, "").toLowerCase();
     if (!isBot && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {
-      const p = parseProductPath(u.pathname);
+      const p = parseProductPath(u.pathname, u.searchParams.get("dq"));
       res.writeHead(302, { Location: p ? outbound(`https://www.alza.cz${p.path}`, carriedQuery(u.searchParams)) : `${PUBLIC_URL}/`, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
       return;
@@ -535,7 +535,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
     }
-    const parsed = parseProductPath(pathname);
+    const parsed = parseProductPath(pathname, u.searchParams.get("dq"));
     if (!parsed) {
       if (pathname === "/" && !alza) {
         if (!isBot) evt = { url: "/", data: visitorData(req, who) };
@@ -642,7 +642,7 @@ const server = http.createServer(async (req, res) => {
     let fallbackQuery = "";
     try {
       const requested = new URL(req.url ?? "/", "http://localhost");
-      fallback = parseProductPath(requested.pathname);
+      fallback = parseProductPath(requested.pathname, requested.searchParams.get("dq"));
       fallbackQuery = carriedQuery(requested.searchParams);
     } catch {
       fallback = null;

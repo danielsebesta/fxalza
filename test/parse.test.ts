@@ -44,3 +44,11 @@ test("only a changed link counts as a cache bust", () => {
   assert.equal(hasCacheBustSuffix("/vention-power-bank-d12352171.htm1"), true);
   assert.equal(hasCacheBustSuffix("/vention-power-bank-d12352171x"), true);
 });
+
+test("takes the product id from ?dq= when the path has none", () => {
+  assert.deepEqual(parseProductPath("/gaming/grand-theft-auto-v-gta-5", "6496142"), { id: "6496142", path: "/-d6496142.htm" });
+  assert.equal(parseProductPath("/gaming/grand-theft-auto-v-gta-5", "abc"), null);
+  assert.equal(parseProductPath("/gaming/grand-theft-auto-v-gta-5", null), null);
+  assert.equal(parseProductPath("/", "6496142"), null);
+  assert.equal(parseProductPath("/neco-d111.htm", "222")?.id, "111");
+});
