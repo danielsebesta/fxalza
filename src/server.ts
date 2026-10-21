@@ -1,6 +1,7 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import { fetchProduct, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
+import { platformOf, track, type TrackEvent } from "./analytics.ts";
 import { hasCacheBustSuffix, parseProductPath, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
@@ -100,8 +101,9 @@ interface ProductResult {
   missing?: boolean;
 }
 
-async function getProduct(id: string, path: string, who: Requester, bust = false): Promise<ProductResult> {
+async function getProduct(id: string, path: string, who: Requester, bust = false, trace?: { cache?: string }): Promise<ProductResult> {
   const hit = peekCached(id);
+  if (trace) trace.cache = hit?.state ?? "miss";
   console.log(`[product] ${id} cache ${hit?.state ?? "miss"}`);
   // A link the user changed on purpose gets another try at a partial result instead of waiting for it to expire.
   if (hit?.state === "fresh" && !(bust && hit.data.partial)) return { data: hit.data, stale: false };
@@ -445,6 +447,7 @@ const server = http.createServer(async (req, res) => {
   const who = identify(req, ua);
   if (who.unlisted) console.log(`[discord] Discordbot user agent from an address outside the published ranges (${who.id})`);
   let logged = "";
+  let evt: TrackEvent | null = null;
 
   try {
     if (req.method === "OPTIONS") {
@@ -508,6 +511,7 @@ const server = http.createServer(async (req, res) => {
         pathname = alza[3] ?? "/";
       } else {
         const target = `https://${alza[1]!.toLowerCase()}${alza[3] ?? "/"}${u.search}`;
+        evt = { url: logged, name: "unsupported_domain", data: { tld, kind: isBot ? platformOf(ua) : "human" } };
         if (u.searchParams.get("format") === "json") {
           res.writeHead(422, { "content-type": "application/json; charset=utf-8", ...CORS_HEADERS });
           res.end(JSON.stringify({ error: "unsupported_domain", domain: `alza.${tld}`, supported: ["alza.cz"] }));
@@ -524,6 +528,7 @@ const server = http.createServer(async (req, res) => {
     const parsed = parseProductPath(pathname);
     if (!parsed) {
       if (pathname === "/" && !alza) {
+        if (!isBot) evt = { url: "/" };
         sendStatic(
           req,
           res,
@@ -542,6 +547,7 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
           res.end("Not found\n");
         } else {
+          evt = { url: logged, name: "not_found", data: { path: logged.slice(0, 100), kind: isBot ? platformOf(ua) : "human" } };
           sendProblem(
             req,
             res,
@@ -580,12 +586,30 @@ const server = http.createServer(async (req, res) => {
     if (!isBot) {
       const known = getCached(parsed.id, true);
       const target = outbound(known?.canonicalUrl ?? `https://www.alza.cz${parsed.path}`, carriedQuery(u.searchParams));
+      evt = { url: `/product/${parsed.id}`, name: "click", data: { product: parsed.id, ...(known ? { name: shortName(known.name, 80) } : {}) } };
       res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
       return;
     }
 
-    const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who, hasCacheBustSuffix(pathname));
+    const trace: { cache?: string } = {};
+    const bust = hasCacheBustSuffix(pathname);
+    const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who, bust, trace);
+    const state = limited ? "limited" : !data ? (missing ? "missing" : "error") : data.partial ? "partial" : stale ? "stale" : "ok";
+    evt = {
+      url: `/product/${parsed.id}`,
+      name: "embed",
+      data: {
+        platform: platformOf(ua),
+        product: parsed.id,
+        ...(data ? { name: shortName(data.name, 80) } : {}),
+        state,
+        cache: trace.cache ?? "miss",
+        tier: rateTier(who),
+        bust,
+        ...(who.unlisted ? { spoofed_discord: true } : {}),
+      },
+    };
     if (limited) {
       sendProblem(req, res, isBot, 429, "Moc požadavků najednou", "Náhled se teď načítá pro hodně odkazů. Zkus to prosím za chvíli.", { "retry-after": "60" }, false);
       return;
@@ -623,6 +647,13 @@ const server = http.createServer(async (req, res) => {
   } finally {
     const ms = Date.now() - started;
     console.log(`${new Date().toISOString()} ${isBot ? "bot " : "human"} ${res.statusCode} ${ms}ms ${logged} (${ua.slice(0, 40)})`);
+    if (evt && req.method === "GET") {
+      track({
+        ...evt,
+        data: { ...evt.data, status: res.statusCode, ms },
+        ...(isBot ? {} : { visitorUa: ua, referrer: String(req.headers.referer ?? ""), language: String(req.headers["accept-language"] ?? "").split(",")[0] }),
+      });
+    }
   }
 });
 
