@@ -7,7 +7,7 @@ export interface FetchResult {
   via: string;
 }
 
-interface FetchOpts {
+export interface FetchOpts {
   headers?: Record<string, string>;
   timeoutMs?: number;
   prefer?: string[];
@@ -15,7 +15,7 @@ interface FetchOpts {
   country?: string;
 }
 
-interface Provider {
+export interface Provider {
   name: string;
   enabled: () => boolean;
   run: (url: string, opts: FetchOpts, timeoutMs: number) => Promise<{ status: number; body: string }>;
@@ -24,6 +24,7 @@ interface Provider {
 const COOLDOWN_MS = Number(process.env.FETCH_COOLDOWN_MS ?? 60_000);
 const SIDECAR_COOLDOWN_MS = Number(process.env.SIDECAR_COOLDOWN_MS ?? 10_000);
 const PAID_MIN_TIMEOUT_MS = 20_000;
+const HEDGE_MS = Number(process.env.FETCH_HEDGE_MS ?? 2500);
 const PAID_DAILY_MAX = Number(process.env.PAID_DAILY_MAX ?? 300);
 let paidDay = "";
 let paidUsed = 0;
@@ -188,57 +189,97 @@ function usable(status: number, body: string): boolean {
   return true;
 }
 
-export async function fetchUrl(url: string, opts: FetchOpts = {}): Promise<FetchResult> {
+interface Attempt {
+  result?: FetchResult;
+  last?: FetchResult;
+  error?: string;
+  overloaded?: OverloadedError;
+}
+
+function runnable(p: Provider): boolean {
+  return p.enabled() && (downUntil.get(p.name) ?? 0) <= Date.now();
+}
+
+async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: number): Promise<Attempt> {
+  if (p.name !== "sidecar") {
+    if (!paidBudgetLeft()) {
+      track({ url: "/upstream", name: "paid_budget_exhausted", data: { provider: p.name } });
+      return { error: `${p.name}: daily budget of ${PAID_DAILY_MAX} paid requests used up` };
+    }
+    paidUsed++;
+  }
+  const t = p.name === "sidecar" ? timeoutMs : Math.max(timeoutMs, PAID_MIN_TIMEOUT_MS);
+  const started = Date.now();
+  let status = 0;
+  let outcome: Attempt;
+  try {
+    const r = await p.run(url, opts, t);
+    status = r.status;
+    if (usable(r.status, r.body)) {
+      track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: true, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
+      console.log(`[fetch] ${p.name} ${r.status} ${Date.now() - started}ms ${new URL(url).pathname}${new URL(url).search}`);
+      failStreak.set(p.name, 0);
+      return { result: { ...r, via: p.name } };
+    }
+    outcome = { last: { ...r, via: p.name }, error: `${p.name}: HTTP ${r.status}` };
+  } catch (e) {
+    if (e instanceof OverloadedError) return { overloaded: e };
+    outcome = { error: `${p.name}: ${e instanceof Error ? e.message : e}` };
+  }
+  track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: false, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
+  const streak = (failStreak.get(p.name) ?? 0) + 1;
+  failStreak.set(p.name, streak);
+  if (p.name !== "sidecar" || streak >= SIDECAR_STREAK) {
+    downUntil.set(p.name, Date.now() + (p.name === "sidecar" ? SIDECAR_COOLDOWN_MS : COOLDOWN_MS));
+  }
+  console.warn(`[fetch] ${p.name} failed for ${url} (${outcome.error}), trying next`);
+  return outcome;
+}
+
+// The sidecar goes first and alone. Paid providers follow in order, but when one has not answered after hedgeMs the next one
+// starts alongside it and the first usable answer wins, so one slow provider does not eat the whole deadline of an embed.
+export async function fetchWith(list: Provider[], url: string, opts: FetchOpts = {}, hedgeMs = HEDGE_MS): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? 25_000;
   const errors: string[] = [];
   let last: FetchResult | null = null;
+  let winner: FetchResult | null = null;
+  let overloaded: OverloadedError | null = null;
+  const pending = new Set<Promise<void>>();
 
-  const order = providers
+  const order = list
     .map((p, i) => ({ p, rank: p.name === "sidecar" ? -2 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
     .sort((a, b) => a.rank - b.rank || (opts.prefer?.indexOf(a.p.name) ?? 0) - (opts.prefer?.indexOf(b.p.name) ?? 0))
     .map((x) => x.p);
 
   for (const p of order) {
-    if (!p.enabled()) continue;
-    if ((downUntil.get(p.name) ?? 0) > Date.now()) continue;
-    if (p.name !== "sidecar") {
-      if (!paidBudgetLeft()) {
-        errors.push(`${p.name}: daily budget of ${PAID_DAILY_MAX} paid requests used up`);
-        track({ url: "/upstream", name: "paid_budget_exhausted", data: { provider: p.name } });
-        continue;
-      }
-      paidUsed++;
-    }
-    const t = p.name === "sidecar" ? timeoutMs : Math.max(timeoutMs, PAID_MIN_TIMEOUT_MS);
-    const started = Date.now();
-    let status = 0;
-    try {
-      const r = await p.run(url, opts, t);
-      status = r.status;
-      if (usable(r.status, r.body)) {
-        track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: true, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
-        console.log(`[fetch] ${p.name} ${r.status} ${Date.now() - started}ms ${new URL(url).pathname}${new URL(url).search}`);
-        failStreak.set(p.name, 0);
-        return { ...r, via: p.name };
-      }
-      last = { ...r, via: p.name };
-      errors.push(`${p.name}: HTTP ${r.status}`);
-    } catch (e) {
-      if (e instanceof OverloadedError) throw e;
-      errors.push(`${p.name}: ${e instanceof Error ? e.message : e}`);
-    }
-    track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: false, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
-    const streak = (failStreak.get(p.name) ?? 0) + 1;
-    failStreak.set(p.name, streak);
-    if (p.name !== "sidecar" || streak >= SIDECAR_STREAK) {
-      downUntil.set(p.name, Date.now() + (p.name === "sidecar" ? SIDECAR_COOLDOWN_MS : COOLDOWN_MS));
-    }
-    console.warn(`[fetch] ${p.name} failed for ${url} (${errors[errors.length - 1]}), trying next`);
+    if (winner || overloaded) break;
+    if (!runnable(p)) continue;
+    const job: Promise<void> = attempt(p, url, opts, timeoutMs)
+      .then((a) => {
+        if (a.result && !winner) winner = a.result;
+        if (a.last) last = a.last;
+        if (a.error) errors.push(a.error);
+        if (a.overloaded) overloaded = a.overloaded;
+      })
+      .finally(() => pending.delete(job));
+    pending.add(job);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stagger = p.name === "sidecar" ? new Promise<void>(() => {}) : new Promise<void>((resolve) => (timer = setTimeout(resolve, hedgeMs)));
+    await Promise.race([job, stagger]);
+    clearTimeout(timer);
   }
+  while (!winner && !overloaded && pending.size > 0) await Promise.race([...pending]);
 
+  if (winner) return winner;
+  if (overloaded) throw overloaded;
   if (last) {
-    console.warn(`[fetch] no usable response, returning ${last.via} HTTP ${last.status} for ${new URL(url).pathname}${new URL(url).search}`);
-    return last;
+    const l: FetchResult = last;
+    console.warn(`[fetch] no usable response, returning ${l.via} HTTP ${l.status} for ${new URL(url).pathname}${new URL(url).search}`);
+    return l;
   }
   throw new Error(`all fetch providers failed: ${errors.join("; ") || "no provider available (disabled or cooling down)"}`);
+}
+
+export function fetchUrl(url: string, opts: FetchOpts = {}): Promise<FetchResult> {
+  return fetchWith(providers, url, opts);
 }
