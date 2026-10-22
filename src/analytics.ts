@@ -29,6 +29,10 @@ export interface TrackEvent {
   referrer?: string;
   language?: string;
   ip?: string;
+  // Address the visitor opened. Umami's Hostname report reads this; events without one are filed under the apex.
+  hostname?: string;
+  // Shop code (cz, sk, hu, de, at). Umami's Tag report and filters read this.
+  tag?: string;
 }
 
 let inFlight = 0;
@@ -44,9 +48,10 @@ export function track(e: TrackEvent): void {
       type: "event",
       payload: {
         website: WEBSITE_ID,
-        hostname: HOSTNAME,
+        hostname: e.hostname || HOSTNAME,
         url: e.url,
         ...(e.name ? { name: e.name } : {}),
+        ...(e.tag ? { tag: e.tag } : {}),
         ...(e.data ? { data: e.data } : {}),
         ...(e.referrer ? { referrer: e.referrer } : {}),
         ...(e.language ? { language: e.language } : {}),

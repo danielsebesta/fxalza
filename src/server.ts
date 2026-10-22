@@ -240,7 +240,7 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
     if (!rich) return `${shortName(i.name, 60)} –${price}${was}`;
     const history = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(i.url)}`;
     const icon = customEmoji ? emojiMd("hlidac_shopu", "📈") : "📈";
-    return `[${mdEsc(shortName(i.name, 60))}](${outbound(i.url, carried)}) —${price}${was} ${icon} [historie](${history})`;
+    return `[${mdEsc(shortName(i.name, 60))}](${outbound(i.url, carried)}) —${price}${was} ${icon} [Hlídač shopů](${history})`;
   };
   const img = list.items.find((i) => i.image)?.image ?? null;
   const imgUrl = img ? `${img}?width=${IMG_W}&height=${IMG_W}` : null;
@@ -871,9 +871,17 @@ const server = http.createServer(async (req, res) => {
     const ms = Date.now() - started;
     console.log(`${new Date().toISOString()} ${isBot ? "bot " : "human"} ${res.statusCode} ${ms}ms ${logged} (${ua.slice(0, 40)})`);
     if (evt && req.method === "GET") {
+      const seenHost = hostOf(req);
+      const shopTag = isExtensionHost(seenHost, APEX) ? "extension" : shop.code;
+      // The Events chart lists names, and click/embed are the actual use of a shop, so the shop is part of the name.
+      // A plain page view (the landing page) keeps no name: Umami then files it under Hostname and Tag, which ignore named events.
+      const name = evt.name === "click" || evt.name === "embed" ? `${evt.name}/${shopTag}` : evt.name;
       track({
         ...evt,
-        data: { ...evt.data, status: res.statusCode, ms },
+        ...(name ? { name } : {}),
+        ...(seenHost ? { hostname: seenHost } : {}),
+        tag: shopTag,
+        data: { ...evt.data, shop: shopTag, status: res.statusCode, ms },
         ...(isBot ? {} : { visitorUa: ua, referrer: String(req.headers.referer ?? ""), language: String(req.headers["accept-language"] ?? "").split(",")[0], ip: anonymizedIp(req) }),
       });
     }
