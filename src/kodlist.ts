@@ -28,10 +28,11 @@ function text(raw: string): string {
     .trim();
 }
 
+// The raw page links products relatively ("/amd-ryzen-5-9600x-d12482042.htm"), a browser's saved copy has them absolute.
 function alzaUrl(value: string | undefined, hostSuffix: string): string | null {
   if (!value) return null;
   try {
-    const u = new URL(value.replace(/&amp;/g, "&"));
+    const u = new URL(value.replace(/&amp;/g, "&"), `https://www.${hostSuffix}/`);
     return u.protocol === "https:" && (u.hostname === hostSuffix || u.hostname.endsWith(`.${hostSuffix}`)) ? u.toString() : null;
   } catch {
     return null;

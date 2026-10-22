@@ -27,3 +27,14 @@ test("parses the products of a listing", () => {
 test("returns null when the page has no products", () => {
   assert.equal(parseKodList("<html><body>nic</body></html>", 1), null);
 });
+
+test("parses the raw page, where products are linked relatively", () => {
+  const raw = readFileSync(new URL("./fixtures/kod-list-raw.html", import.meta.url), "utf8");
+  const list = parseKodList(raw, 8)!;
+  assert.equal(list.items.length, 8);
+  assert.equal(list.items[0]!.url, "https://www.alza.cz/amd-ryzen-5-9600x-d12482042.htm");
+  assert.equal(list.items[0]!.priceText, "4 890 Kč");
+  assert.equal(list.items[2]!.wasText, "3 279 Kč");
+  assert.equal(list.total, 45576);
+  assert.ok(list.items.every((i) => i.image?.startsWith("https://image.alza.cz/products/")));
+});
