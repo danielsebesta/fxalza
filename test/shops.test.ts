@@ -11,7 +11,10 @@ test("a shop is recognised by its subdomain of the apex, and the apex is the Cze
   assert.equal(shopOfHost("at.fxalza.cz", "fxalza.cz"), SHOPS.at);
   assert.equal(shopOfHost("cz.fxalza.cz", "fxalza.cz"), SHOPS.cz);
   assert.equal(shopOfHost("fxalza.cz", "fxalza.cz"), SHOPS.cz);
-  for (const host of ["www.fxalza.cz", "m.fxalza.cz", "pl.fxalza.cz", "a.sk.fxalza.cz", "sk.example.com", "xsk.fxalza.cz", "sk.fxalza.cz.evil.com"]) {
+  // people turn www.alza.sk into www.sk.fxalza.cz
+  assert.equal(shopOfHost("www.sk.fxalza.cz", "fxalza.cz"), SHOPS.sk);
+  assert.equal(shopOfHost("www.de.fxalza.cz", "fxalza.cz"), SHOPS.de);
+  for (const host of ["www.fxalza.cz", "m.fxalza.cz", "pl.fxalza.cz", "a.sk.fxalza.cz", "www.pl.fxalza.cz", "www.www.sk.fxalza.cz", "www.sk.example.com", "sk.example.com", "xsk.fxalza.cz", "sk.fxalza.cz.evil.com"]) {
     assert.equal(shopOfHost(host, "fxalza.cz"), null, host);
   }
 });

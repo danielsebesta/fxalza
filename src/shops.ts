@@ -59,13 +59,13 @@ export function siteUrl(shop: Shop, apex: string = SITE_APEX, domains: SiteDomai
   return `https://${siteHost(shop, apex, domains)}`;
 }
 
-// The shop whose pages this host serves: its own domain or its subdomain of the apex ("sk.fxalza.cz"). The apex is the Czech shop,
+// The shop whose pages this host serves: its own domain or its subdomain of the apex ("sk.fxalza.cz", also with a www in front). The apex is the Czech shop,
 // www and anything unknown are not a shop host.
 export function shopOfHost(host: string, apex: string = SITE_APEX, domains: SiteDomains = SITE_DOMAINS): Shop | null {
   return (
     ALL_SHOPS.find((s) => host === siteHost(s, apex, domains)) ??
     ALL_SHOPS.find((s) => domains[s.code] !== undefined && host === `www.${domains[s.code]}`) ??
-    ALL_SHOPS.find((s) => host === `${s.code}.${apex}`) ??
+    ALL_SHOPS.find((s) => host === `${s.code}.${apex}` || host === `www.${s.code}.${apex}`) ??
     null
   );
 }
