@@ -265,9 +265,8 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
       ...(missing ? [`-# ${missing}`] : []),
     ].join("\n");
     const components: unknown[] = [
-      imgUrl
-        ? { type: 9, components: [{ type: 10, content }], accessory: { type: 11, media: { url: imgUrl } } }
-        : { type: 10, content },
+      { type: 10, content },
+      ...(imgUrl ? [{ type: 12, items: [{ media: { url: imgUrl } }] }] : []),
       { type: 14 },
       {
         type: 1,
@@ -417,16 +416,8 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
       if (lines.length > 0) parts.push("");
     }
     const summary = [...parts, ...lines.map((l) => `- ${l}`)].join("\n");
-    const components: unknown[] = [];
-    if (withThumb && img) {
-      components.push({
-        type: 9,
-        components: [{ type: 10, content: summary }],
-        accessory: { type: 11, media: { url: img } },
-      });
-    } else {
-      components.push({ type: 10, content: summary });
-    }
+    const components: unknown[] = [{ type: 10, content: summary }];
+    if (withThumb && img) components.push({ type: 12, items: [{ media: { url: img } }] });
     components.push({ type: 14 });
     components.push({
       type: 1,
