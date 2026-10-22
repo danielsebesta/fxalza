@@ -118,6 +118,7 @@ interface ProductResult {
   stale: boolean;
   limited?: boolean;
   missing?: boolean;
+  timedOut?: boolean;
 }
 
 async function getProduct(shop: Shop, id: string, path: string, who: Requester, bust = false, trace?: { cache?: string }): Promise<ProductResult> {
@@ -156,7 +157,7 @@ async function getProduct(shop: Shop, id: string, path: string, who: Requester, 
     console.warn(`[product] ${key} not ready after ${EMBED_DEADLINE_MS}ms, answering with what we have`);
     pending.catch((e) => console.error(`[fetch] ${key} failed after the deadline: ${e instanceof Error ? e.message : e}`));
     const old = getCached(key, true);
-    return { data: old, stale: old !== null };
+    return { data: old, stale: old !== null, ...(old === null ? { timedOut: true } : {}) };
   } catch (e) {
     console.error(`[fetch] ${key} failed: ${e instanceof Error ? e.message : e}`);
     const old = getCached(key, true);
@@ -463,7 +464,7 @@ function shortName(name: string, max = 70): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
 }
 
-function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true): string {
+function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true, timedOut = false): string {
   const t = texts(shop.lang);
   const slugged = slugTitle(path);
   const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
@@ -484,7 +485,7 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
     if (stale) parts.push(t.stale);
     if (p.partial) parts.push(t.partial);
   } else {
-    parts.push(missing ? t.missing : t.failed);
+    parts.push(missing ? t.missing : timedOut ? t.partial : t.failed);
   }
   let desc = parts.join(" • ");
   if (p?.description) {
@@ -814,8 +815,8 @@ const server = http.createServer(async (req, res) => {
 
     const trace: { cache?: string } = {};
     const bust = hasCacheBustSuffix(pathname);
-    const { data, stale, limited, missing } = await getProduct(shop, parsed.id, parsed.path, who, bust, trace);
-    const state = limited ? "limited" : !data ? (missing ? "missing" : "error") : data.partial ? "partial" : stale ? "stale" : "ok";
+    const { data, stale, limited, missing, timedOut } = await getProduct(shop, parsed.id, parsed.path, who, bust, trace);
+    const state = limited ? "limited" : !data ? (missing ? "missing" : timedOut ? "timeout" : "error") : data.partial ? "partial" : stale ? "stale" : "ok";
     evt = {
       url: `/product/${parsed.id}`,
       name: "embed",
@@ -836,11 +837,11 @@ const server = http.createServer(async (req, res) => {
       sendProblem(req, res, shop, isBot, 429, landingTexts(shop.lang).problems.rateTitle, landingTexts(shop.lang).problems.rateBody, { "retry-after": "60" }, false);
       return;
     }
-    if (!data && !missing) {
+    if (!data && !missing && !timedOut) {
       sendProblem(req, res, shop, isBot, 503, landingTexts(shop.lang).problems.loadTitle, landingTexts(shop.lang).problems.loadBody, { "retry-after": "30" }, false);
       return;
     }
-    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram);
+    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram, timedOut);
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
