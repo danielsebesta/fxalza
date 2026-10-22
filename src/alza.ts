@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
 import { texts } from "./i18n.ts";
-import { parseKodList, type KodList } from "./kodlist.ts";
+import { kodCodes, parseKodList, type KodItem, type KodList } from "./kodlist.ts";
 import { parseProductPath, type Parsed } from "./parse.ts";
 import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 
@@ -468,11 +468,62 @@ function dumpUnparsed(kind: string, pathname: string, html: string): void {
   }
 }
 
+const KOD_ITEMS_MAX = 12;
+const KOD_PARALLEL = 4;
+
+// /kod/<one code> redirects to that product's page, so a listing can also be put together from one request per code.
+async function fetchKodItem(code: string): Promise<KodItem | null> {
+  const p = extractProductJsonLd(await getHtml(CZ, `/kod/${code}`));
+  if (!p) return null;
+  const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
+  const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
+  const url = claimed && httpsUrlOn(claimed, "alza.cz");
+  const id = url ? parseProductPath(new URL(url).pathname)?.id : undefined;
+  const name = p.name ? decodeEntities(String(p.name)) : "";
+  if (!url || !id || !name) return null;
+  const raw = offers?.price === undefined || offers?.price === null ? NaN : typeof offers.price === "number" ? offers.price : Number(String(offers.price).replace(",", "."));
+  const price = Number.isFinite(raw) && raw > 0 ? raw : null;
+  const im = Array.isArray(p.image) ? (typeof p.image[0] === "string" ? p.image[0] : p.image[0]?.url) : typeof p.image === "string" ? p.image : p.image?.url;
+  const image = typeof im === "string" ? httpsUrlOn(im, "alza.cz") : null;
+  return {
+    id,
+    name,
+    url: url.split("?")[0]!,
+    price,
+    priceText: price === null ? null : formatMoney(CZ, price),
+    wasText: null,
+    availability: offers?.availability ? (texts(CZ.lang).availability[String(offers.availability).split("/").pop()!] ?? null) : null,
+    image: image ? image.split("?")[0]! : null,
+  };
+}
+
+async function fetchKodByCodes(codes: string[]): Promise<KodList | null> {
+  const wanted = codes.slice(0, KOD_ITEMS_MAX);
+  const items: (KodItem | null)[] = new Array(wanted.length).fill(null);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(KOD_PARALLEL, wanted.length) }, async () => {
+      while (next < wanted.length) {
+        const i = next++;
+        items[i] = await fetchKodItem(wanted[i]!).catch((e) => {
+          console.warn(`[kod] code ${wanted[i]} not read: ${e instanceof Error ? e.message : e}`);
+          return null;
+        });
+      }
+    }),
+  );
+  const found = items.filter((i): i is KodItem => i !== null);
+  if (found.length === 0) return null;
+  return { items: found, requested: codes.length, total: found.reduce((sum, i) => sum + (i.price ?? 0), 0) };
+}
+
 export async function fetchKodList(pathname: string, requested: number): Promise<KodList | null> {
   const html = await getHtml(CZ, pathname);
   const list = parseKodList(html, requested);
-  if (!list) dumpUnparsed("kod", pathname, html);
-  return list;
+  if (list) return list;
+  dumpUnparsed("kod", pathname, html);
+  console.log(`[kod] falling back to one request per code for ${pathname}`);
+  return fetchKodByCodes(kodCodes(pathname));
 }
 
 // Alza redirects a bare slug such as /gaming/hogwarts-legacy to one concrete product page; its JSON-LD names the canonical -d<id> link.

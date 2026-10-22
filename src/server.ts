@@ -233,7 +233,7 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
   const count = list.items.length;
   const noun = count === 1 ? "položka" : count < 5 ? "položky" : "položek";
   const heading = `Výpis zboží: ${count} ${noun}, celkem ${totalText}`;
-  const missing = list.requested > count ? `Alza zobrazila ${count} z ${list.requested} položek.` : "";
+  const missing = list.requested > count ? `Načteno ${count} z ${list.requested} položek.` : "";
   const line = (i: (typeof list.items)[number], rich: boolean): string => {
     const price = i.priceText ? (rich ? ` **${i.priceText}**` : ` ${i.priceText}`) : "";
     const was = i.wasText ? (rich ? ` ~~${i.wasText}~~` : ` (bylo ${i.wasText})`) : "";
