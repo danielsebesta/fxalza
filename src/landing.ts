@@ -1,14 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { texts } from "./i18n.ts";
+import { landingTexts, type LandingTexts } from "./landing-i18n.ts";
+import { ALL_SHOPS, CZ, siteHost, type Lang, type Shop } from "./shops.ts";
 
 const GITHUB = "https://github.com/danielsebesta/fxalza";
 const AUTHOR = "Daniel Šebesta";
 const AUTHOR_URL = "https://sebesta.dev";
 export const PUBLIC_URL = (process.env.PUBLIC_URL ?? "https://fxalza.cz").replace(/\/$/, "");
-
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 
 function read(rel: string, enc: BufferEncoding = "utf8"): string {
   try {
@@ -18,30 +17,42 @@ function read(rel: string, enc: BufferEncoding = "utf8"): string {
   }
 }
 
-const DEMO = read("./landing-demo.html");
+// Every shop shows products of its own in the demo; a shop whose demo has not been made yet shows the Czech one.
+const CZ_DEMO = read("./landing-demo.html");
+const DEMOS: Record<string, string> = Object.fromEntries(
+  ALL_SHOPS.map((shop) => [shop.code, shop.code === "cz" ? CZ_DEMO : read(`./landing-demo.${shop.code}.html`) || CZ_DEMO]),
+);
 
 export const FAVICON_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 136 136" shape-rendering="crispEdges"><g fill="#0f6fc5"><path d="M97.46 64.08V37.3H84.04V23.9H70.65v13.4H57.26V23.9H43.87v13.4H30.48v26.78H17.09v13.39h13.39v13.4h13.39v13.38h13.39V90.87h13.39v13.38h13.39V90.87h13.42v-13.4h13.37V64.08H97.46zm-40.21 0H43.86V50.69h13.39v13.39zm26.78 0H70.64V50.69h13.39v13.39z"/><path d="M30.47 104.24h13.39v13.39H30.47z"/><path d="M84.04 104.24h13.39v13.39H84.04z"/><path d="M30.48 10.51h13.39V23.9H30.48z"/><path d="M84.04 10.51h13.39V23.9H84.04z"/><path d="M110.82 37.29h13.4v26.8h-13.4z"/><path d="M3.7 37.28h13.4v26.8H3.7z"/></g></svg>';
 
-const SCRIPT = `(function () {
+// What the converter script says and where it sends a link are part of the script, so every language has a script, and a CSP hash, of its own.
+type ScriptData = LandingTexts["script"] & { hosts: Record<string, string> };
+
+function buildScript(m: ScriptData): string {
+  const data = JSON.stringify(m).replace(/</g, "\\u003c");
+  return `(function () {
+  var M = ${data};
   var input = document.getElementById("in"), out = document.getElementById("out"), copy = document.getElementById("copy");
   var link = "";
   function msg(text) { out.className = "small"; out.textContent = text; copy.disabled = true; }
   function render() {
     link = "";
     var v = input.value.trim();
-    if (!v) return msg("Vlož odkaz z Alzy.");
+    if (!v) return msg(M.enter);
     try {
       var u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(v) ? v : "https://" + v);
       if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("scheme");
-      if (/(^|\\.)alza\\.(sk|de|at|ch|hu|pl|co\\.uk)$/i.test(u.hostname)) return msg("Funguje jen pro Alza.cz.");
-      if (!/(^|\\.)alza\\.cz$/i.test(u.hostname)) throw new Error("host");
-      if (!/-d\\d+\\.htm$/i.test(u.pathname)) return msg("Vlož odkaz na konkrétní produkt (končí na -d1234567.htm).");
-      link = location.origin + u.pathname;
+      var shop = /(^|\\.)alza\\.([a-z.]+)$/i.exec(u.hostname);
+      if (!shop) throw new Error("host");
+      var tld = shop[2].toLowerCase();
+      if (!/^(cz|sk|hu|de|at)$/.test(tld)) return msg(M.unsupported);
+      if (!/-d\\d+\\.htm$/i.test(u.pathname)) return msg(M.notProduct);
+      link = "https://" + M.hosts[tld] + u.pathname;
       out.className = ""; out.textContent = "";
       var c = document.createElement("code"); c.textContent = link; out.appendChild(c);
       copy.disabled = false;
-    } catch (e) { msg("Tohle nevypadá jako odkaz na alza.cz."); }
+    } catch (e) { msg(M.notLink); }
   }
   var frame = document.getElementById("demo");
   var wrap = document.getElementById("demo-wrap");
@@ -58,7 +69,7 @@ const SCRIPT = `(function () {
   }
   function stamp() {
     var now = new Date();
-    var text = "dnes v " + ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2);
+    var text = M.today + " " + ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2) + M.todaySuffix;
     frame.contentDocument.querySelectorAll(".discord-message-timestamp").forEach(function (el) { el.textContent = text; });
   }
   frame.addEventListener("load", function () {
@@ -71,23 +82,32 @@ const SCRIPT = `(function () {
   copy.addEventListener("click", function () {
     if (!link) return;
     navigator.clipboard.writeText(link).then(function () {
-      copy.textContent = "Zkopírováno"; setTimeout(function () { copy.textContent = "Zkopírovat"; }, 1500);
+      copy.textContent = M.copied; setTimeout(function () { copy.textContent = M.copy; }, 1500);
     });
   });
 })();`;
+}
 
-const SCRIPT_HASH = createHash("sha256").update(SCRIPT).digest("base64");
-export const LANDING_CSP = [
-  "default-src 'none'",
-  `script-src 'sha256-${SCRIPT_HASH}'`,
-  "style-src 'unsafe-inline'",
-  "font-src 'self'",
-  "img-src 'self' data:",
-  "frame-src 'self'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'",
-].join("; ");
+const SITE_HOSTS: Record<string, string> = Object.fromEntries(ALL_SHOPS.map((shop) => [shop.tld, siteHost(shop)]));
+const LANGS: Lang[] = ["cs", "sk", "hu", "de"];
+const SCRIPTS = Object.fromEntries(LANGS.map((lang) => [lang, buildScript({ ...landingTexts(lang).script, hosts: SITE_HOSTS })])) as Record<Lang, string>;
+
+export function landingCsp(lang: Lang): string {
+  return [
+    "default-src 'none'",
+    `script-src 'sha256-${createHash("sha256").update(SCRIPTS[lang]).digest("base64")}'`,
+    "style-src 'unsafe-inline'",
+    "font-src 'self'",
+    "img-src 'self' data:",
+    "frame-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
+// pages without a script need no hash, any of them will do
+export const LANDING_CSP = landingCsp("cs");
 
 const FONT_CSS = `@font-face{font-family:"Roboto";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/roboto-latin-ext.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
 @font-face{font-family:"Roboto";font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/roboto-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}`;
@@ -139,14 +159,15 @@ export const DEMO_CSP = [
   "frame-ancestors 'self'",
 ].join("; ");
 
-export const DEMO_HTML = `<!DOCTYPE html>
-<html lang="cs">
+export function demoHtml(shop: Shop = CZ): string {
+  return `<!DOCTYPE html>
+<html lang="${shop.locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex">
-<title>Ukázka náhledu</title>
+<title>${esc(landingTexts(shop.lang).demoTitle)}</title>
 <link href="https://fonts.cdnfonts.com/css/gg-sans-2" rel="stylesheet">
 <style>
 ${FONT_CSS}
@@ -155,32 +176,51 @@ body{display:flow-root;margin:0;background:transparent;color:var(--fg);font:17px
 ${DEMO_CSS}
 </style>
 </head>
-<body>${DEMO}</body>
+<body>${DEMOS[shop.code]}</body>
 </html>
 `;
+}
 
 const DESCRIPTION =
   "Open source nástroj, který na Discordu ukáže náhled odkazů z Alzy: název, cenu, slevy, kupóny, cashback a klubové ceny.";
 
-export const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
+export function robotsTxt(shop: Shop = CZ): string {
+  return `User-agent: *
+Allow: /$
+Disallow: /
+
+Sitemap: https://${siteHost(shop)}/sitemap.xml
+`;
+}
+
+// A sitemap may only list the host it is served from, so every shop has one of its own.
+export function sitemapXml(shop: Shop = CZ): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>${PUBLIC_URL}/</loc></url>
+  <url><loc>https://${siteHost(shop)}/</loc></url>
 </urlset>
 `;
+}
 
 export const LLMS_TXT = `# fxalza
 
 > ${DESCRIPTION}
 
-Stačí v odkazu na produkt přepsat alza.cz na ${new URL(PUBLIC_URL).hostname} a Discord ukáže cenu, slevy, kupóny a klubové ceny.
+Stačí v odkazu na produkt přepsat alza.cz na ${siteHost(CZ)} a Discord ukáže cenu, slevy, kupóny a klubové ceny.
+Alza.sk, Alza.hu, Alza.de a Alza.at fungují přes ${ALL_SHOPS.filter((shop) => shop.code !== "cz").map((shop) => siteHost(shop)).join(", ")}.
 
 - [Úvodní stránka](${PUBLIC_URL}/): návod a převodník odkazů
 - [Zdrojový kód](${GITHUB}): licence MIT
 `;
 
-export function problemHtml(title: string, message: string): string {
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+export function problemHtml(title: string, message: string, shop: Shop = CZ): string {
+  const t = landingTexts(shop.lang);
   return `<!DOCTYPE html>
-<html lang="cs">
+<html lang="${shop.locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -191,6 +231,7 @@ export function problemHtml(title: string, message: string): string {
 <meta name="theme-color" content="#e5484d">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="fxalza">
+<meta property="og:locale" content="${shop.locale.replace("-", "_")}">
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(message)}">
 <meta name="twitter:card" content="summary">
@@ -210,37 +251,61 @@ h1{font-size:1.8rem;line-height:1.25;letter-spacing:-.02em;color:var(--head);mar
 <img class="logo" src="/favicon.svg" width="64" height="64" alt="">
 <h1>${esc(title)}</h1>
 <p>${esc(message)}</p>
-<p><a href="/">Zpět na fxalza</a></p>
+<p><a href="/">${esc(t.problems.back)}</a></p>
 </body>
 </html>
 `;
 }
 
-export function landingHtml(host: string, disclaimer: string): string {
-  const h = esc(host);
+// "sk.fxalza.cz" is shown as a dim "sk." before the name and a dim ".cz" after it, "fxalza.sk" as just the name and a dim ".sk".
+function heroParts(host: string): { prefix: string; tld: string } {
+  const m = /^(?:(.+)\.)?fxalza\.([a-z.]+)$/.exec(host);
+  // a host that is not called fxalza (a staging site) keeps the name and shows its own last label
+  return m ? { prefix: m[1] ? `${m[1]}.` : "", tld: `.${m[2]}` } : { prefix: "", tld: host.includes(".") ? host.slice(host.lastIndexOf(".")) : "" };
+}
+
+export function landingHtml(shop: Shop = CZ): string {
+  const t = landingTexts(shop.lang);
+  const here = siteHost(shop);
+  const url = `https://${here}/`;
+  const from = `alza.${shop.tld}`;
+  const hero = heroParts(here);
+  const others = ALL_SHOPS.filter((s) => s.code !== shop.code)
+    .map((s) => `<code>alza.${s.tld}</code> → <code>${esc(siteHost(s))}</code>`)
+    .join(" · ");
+  const alternates = [
+    ...ALL_SHOPS.map((s) => `<link rel="alternate" hreflang="${s.locale}" href="https://${siteHost(s)}/">`),
+    `<link rel="alternate" hreflang="x-default" href="https://${siteHost(CZ)}/">`,
+  ].join("\n  ");
+  // every version but the Czech one is a translation of it, and says so
+  const translationNote =
+    shop.code === "cz" ? "" : `\n  <p>${t.machineTranslation(`<a href="https://${siteHost(CZ)}/" hreflang="cs">${siteHost(CZ)}</a>`)}</p>`;
+  const localeAlternates = ALL_SHOPS.filter((s) => s.code !== shop.code)
+    .map((s) => `<meta property="og:locale:alternate" content="${s.locale.replace("-", "_")}">`)
+    .join("\n  ");
   const ld = JSON.stringify({
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     name: "fxalza",
-    url: PUBLIC_URL + "/",
-    description: DESCRIPTION,
+    url,
+    description: t.description,
     applicationCategory: "UtilitiesApplication",
     operatingSystem: "Web",
-    inLanguage: "cs",
+    inLanguage: shop.locale,
     isAccessibleForFree: true,
     license: "https://opensource.org/license/mit",
     codeRepository: GITHUB,
-    offers: { "@type": "Offer", price: "0", priceCurrency: "CZK" },
+    offers: { "@type": "Offer", price: "0", priceCurrency: shop.currency },
     author: { "@type": "Person", name: AUTHOR, url: AUTHOR_URL },
   }).replace(/</g, "\\u003c");
 
   return `<!DOCTYPE html>
-<html lang="cs">
+<html lang="${shop.locale}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>fxalza - náhledy odkazů z Alzy na Discordu</title>
-  <meta name="description" content="${esc(DESCRIPTION)}">
+  <title>${esc(t.title)}</title>
+  <meta name="description" content="${esc(t.description)}">
   <meta name="author" content="${AUTHOR}">
   <meta name="application-name" content="fxalza">
   <meta name="robots" content="index, follow, max-image-preview:large">
@@ -248,19 +313,21 @@ export function landingHtml(host: string, disclaimer: string): string {
   <meta name="theme-color" content="#0f6fc5">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="format-detection" content="telephone=no">
-  <link rel="canonical" href="${PUBLIC_URL}/">
+  <link rel="canonical" href="${url}">
+  ${alternates}
   <link rel="preload" href="/fonts/roboto-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="author" href="${AUTHOR_URL}">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="fxalza">
-  <meta property="og:locale" content="cs_CZ">
-  <meta property="og:url" content="${PUBLIC_URL}/">
-  <meta property="og:title" content="fxalza - náhledy odkazů z Alzy na Discordu">
-  <meta property="og:description" content="${esc(DESCRIPTION)}">
+  <meta property="og:locale" content="${shop.locale.replace("-", "_")}">
+  ${localeAlternates}
+  <meta property="og:url" content="${url}">
+  <meta property="og:title" content="${esc(t.title)}">
+  <meta property="og:description" content="${esc(t.description)}">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="fxalza - náhledy odkazů z Alzy na Discordu">
-  <meta name="twitter:description" content="${esc(DESCRIPTION)}">
+  <meta name="twitter:title" content="${esc(t.title)}">
+  <meta name="twitter:description" content="${esc(t.description)}">
   <script type="application/ld+json">${ld}</script>
   <style>
     ${FONT_CSS}
@@ -301,46 +368,48 @@ export function landingHtml(host: string, disclaimer: string): string {
 <body>
 <header>
   <img class="logo" src="/favicon.svg" width="80" height="80" alt="">
-  <h1><span class="fx">fx</span>alza<span class="tld">.cz</span></h1>
-  <p class="sub">Náhledy odkazů z Alzy na Discordu</p>
+  <h1>${hero.prefix ? `<span class="tld">${esc(hero.prefix)}</span>` : ""}<span class="fx">fx</span>alza<span class="tld">${esc(hero.tld)}</span></h1>
+  <p class="sub">${esc(t.tagline)}</p>
 </header>
 
-<p>Pošleš odkaz z Alzy a na Discordu z něj zbyde jen odkaz. Žádná fotka, žádný popisek, žádná cena, nic.</p>
-<p>Přidej před <code>alza.cz</code> písmena <span class="fx">fx</span> (<code>${h}</code>) a Discord z něj udělá kartu s fotkou, cenou, slevami a kupóny.</p>
+<p>${t.intro1}</p>
+<p>${t.intro2(from, esc(here))}</p>
 
-<figure><div id="demo-wrap" class="demo-wrap"><iframe id="demo" class="demo-frame" src="/demo" title="Ukázka náhledu odkazu na Discordu" loading="lazy" scrolling="no"></iframe></div></figure>
+<figure><div id="demo-wrap" class="demo-wrap"><iframe id="demo" class="demo-frame" src="/demo" title="${esc(t.demoTitle)}" loading="lazy" scrolling="no"></iframe></div></figure>
 
-<h2>Jak na to</h2>
+<h2>${esc(t.howTitle)}</h2>
 <ol>
-  <li>Otevři produkt na Alze a zkopíruj odkaz.</li>
-  <li>Před <code>alza.cz</code> dopiš <span class="fx">fx</span>. Nic dalšího přepisovat nemusíš, <code>www.</code> i zbytek odkazu klidně zůstanou. Nebo ho nech přepsat v políčku níž.</li>
-  <li>Pošli to na Discord. Kdo na odkaz klikne, skončí rovnou na Alze.</li>
+  <li>${t.step1}</li>
+  <li>${t.step2(from, esc(here))}</li>
+  <li>${t.step3}</li>
 </ol>
+<p class="small">${esc(t.othersLead)} ${others}</p>
 <div class="try">
-  <label for="in">Odkaz z Alzy</label>
+  <label for="in">${esc(t.tryLabel)}</label>
   <div class="row">
-    <input id="in" type="url" inputmode="url" placeholder="alza.cz/…-d1234567.htm" autocomplete="off" spellcheck="false">
-    <button id="copy" type="button" disabled>Zkopírovat</button>
+    <input id="in" type="url" inputmode="url" placeholder="${esc(from)}/…-d1234567.htm" autocomplete="off" spellcheck="false">
+    <button id="copy" type="button" disabled>${esc(t.script.copy)}</button>
   </div>
-  <p id="out" class="small" aria-live="polite">Vlož odkaz z Alzy.</p>
+  <p id="out" class="small" aria-live="polite">${esc(t.script.enter)}</p>
 </div>
 
-<h2>Neoficiální a open source</h2>
-<p>Kód je pod licencí MIT: <a href="${GITHUB}" rel="noopener">github.com/danielsebesta/fxalza</a>. Nejsme oficiální produkt Alzy a s Alza.cz nijak nesouvisíme. Značka a logo patří jejich vlastníkům. Ceny můžou být zastaralé, rozhoduje vždy web Alzy.</p>
+<h2>${esc(t.openSourceTitle)}</h2>
+<p>${t.openSource(`<a href="${GITHUB}" rel="noopener">github.com/danielsebesta/fxalza</a>`)}</p>
 
-<h2>Poděkování</h2>
+<h2>${esc(t.thanksTitle)}</h2>
 <ul class="credits">
-  <li><a href="https://github.com/FxEmbed/FxEmbed" rel="noopener">FxEmbed</a> (MIT) - inspirace a rozpoznávání botů</li>
-  <li><a href="https://github.com/dexnis-dev/Alza-Benefit-Prices" rel="noopener">Alza-Benefit-Prices</a> - inspirace pro celý projekt a jeho logiku, hlavně klubové ceny a kupóny</li>
-  <li><a href="https://github.com/lukabudik/alza-mcp-community" rel="noopener">alza-mcp-community</a> (MCP server pro Alzu) - inspirace v tom, jak s Alzou komunikovat, a nápad s <code>utm_source</code></li>
-  <li><a href="https://www.hlidacshopu.cz" rel="noopener">Hlídač shopů</a> - historie cen na tlačítku v náhledu</li>
+  <li><a href="https://github.com/FxEmbed/FxEmbed" rel="noopener">FxEmbed</a> ${t.creditFxembed}</li>
+  <li><a href="https://github.com/dexnis-dev/Alza-Benefit-Prices" rel="noopener">Alza-Benefit-Prices</a> ${t.creditExtension}</li>
+  <li><a href="https://github.com/lukabudik/alza-mcp-community" rel="noopener">alza-mcp-community</a> ${t.creditMcp}</li>${
+    shop.history ? `\n  <li><a href="https://www.hlidacshopu.cz" rel="noopener">Hlídač shopů</a> ${t.creditHistory}</li>` : ""
+  }
 </ul>
 
 <footer>
-  <p>Vytvořil <a href="${AUTHOR_URL}" rel="author noopener">${AUTHOR}</a></p>
-${disclaimer.split("\n").map((line) => `  <p>${esc(line)}</p>`).join("\n")}
+  <p>${esc(t.madeBy)} <a href="${AUTHOR_URL}" rel="author noopener">${AUTHOR}</a></p>${translationNote}
+${texts(shop.lang).disclaimer.replace("{tld}", shop.tld).split("\n").map((line) => `  <p>${esc(line)}</p>`).join("\n")}
 </footer>
-<script>${SCRIPT}</script>
+<script>${SCRIPTS[shop.lang]}</script>
 </body>
 </html>`;
 }

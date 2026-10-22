@@ -1,7 +1,9 @@
 import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
+import { texts } from "./i18n.ts";
 import { parseKodList, type KodList } from "./kodlist.ts";
 import { parseProductPath, type Parsed } from "./parse.ts";
+import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 
 export { stopSidecar } from "./fetcher.ts";
 
@@ -14,6 +16,8 @@ export interface BenefitEntry {
   percentShown: number | null;
   wasPriceText?: string;
   note?: string;
+  // the code of a coupon, so the line can set it in monospace whatever the language of the label
+  coupon?: string;
 }
 
 export interface ProductData {
@@ -33,20 +37,9 @@ export interface ProductData {
   benefits: BenefitEntry[];
   partial?: true;
   fetchedAt: string;
+  // the shop the product was read from, a missing value means Alza.cz
+  shop?: ShopCode;
 }
-
-const AVAILABILITY_CS: Record<string, string> = {
-  InStock: "Skladem",
-  OutOfStock: "Není skladem",
-  PreOrder: "Předprodej",
-  PreSale: "Předprodej",
-  BackOrder: "Na objednávku",
-  LimitedAvailability: "Poslední kusy",
-  InStoreOnly: "Jen na prodejně",
-  SoldOut: "Vyprodáno",
-  OnlineOnly: "Jen online",
-  Discontinued: "Prodej skončil",
-};
 
 const BENEFITS_ENABLED = process.env.BENEFITS !== "0";
 const BENEFITS_GRACE_MS = Number(process.env.BENEFITS_GRACE_MS ?? 1500);
@@ -65,6 +58,11 @@ export const TIERS: TierDef[] = [
   { name: "B2B", pgrik: "p_pg6_6ce49" },
   { name: "Basic", pgrik: "p__26752", reference: true },
 ];
+
+// ISIC is left out where the shop has no such price list.
+export function tiersFor(shop: Shop): TierDef[] {
+  return shop.hasIsic ? TIERS : TIERS.filter((t) => t.name !== "ISIC");
+}
 
 export interface PriceCandidate {
   amount: number;
@@ -142,14 +140,15 @@ function computeTier(pricing: any, reference: boolean): Omit<TierResult, "tier">
   return { hidden: false, selected, main: mainCandidate, promos, ...(compare ? { compare: compare.amount } : {}) };
 }
 
-export async function fetchTier(id: string, tier: TierDef): Promise<TierResult | null> {
-  const url = `https://webapi.alza.cz/api/commodity/v1/${id}/detailPriceInfoV3?country=CZ&pgrik=${tier.pgrik}&ucik=null`;
+export async function fetchTier(id: string, tier: TierDef, shop: Shop = CZ): Promise<TierResult | null> {
+  const url = `https://webapi.alza.cz/api/commodity/v1/${id}/detailPriceInfoV3?country=${shop.country}&pgrik=${tier.pgrik}&ucik=null`;
   let res;
   try {
     res = await fetchUrl(url, {
       headers: { Accept: "application/json, text/html;q=0.9" },
       timeoutMs: 8000,
       prefer: ["firecrawl"],
+      country: shop.country,
     });
   } catch {
     return null;
@@ -166,16 +165,13 @@ export async function fetchTier(id: string, tier: TierDef): Promise<TierResult |
   return { tier: tier.name, ...computeTier(pricing, !!tier.reference) };
 }
 
-function fmtCzk2(n: number): string {
-  return new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 2 }).format(n).replace(/\u00A0/g, " ") + " Kč";
-}
-
-function promoTag(c: PriceCandidate): string {
+function promoTag(c: PriceCandidate, shop: Shop): string {
+  const t = texts(shop.lang);
   if (c.priceType === 4) return "AlzaPlus+";
-  if (c.coupon) return "kód";
-  if (c.priceType === 2) return "výkup";
-  if (c.priceType === 1) return "cashback";
-  return c.name || "akce";
+  if (c.coupon) return t.tagCoupon;
+  if (c.priceType === 2) return t.tagTradein;
+  if (c.priceType === 1) return t.tagCashback;
+  return c.name || t.tagPromo;
 }
 
 interface BenefitsResult {
@@ -187,7 +183,7 @@ interface BenefitsResult {
 const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 1200);
 const LEAN_TIERS = process.env.TIERS_LEAN !== "0";
 const CLUB_FOLLOWERS = ["Silver", "Bronze"];
-const FIRST_TIERS = LEAN_TIERS ? TIERS.filter((t) => !CLUB_FOLLOWERS.includes(t.name)) : TIERS;
+const firstTiers = (shop: Shop): TierDef[] => (LEAN_TIERS ? tiersFor(shop).filter((t) => !CLUB_FOLLOWERS.includes(t.name)) : tiersFor(shop));
 
 function clubPriceVisible(t: TierResult | undefined, base: number | null): boolean {
   return !!t && !t.hidden && !!t.main && !!t.selected && base !== null && t.main.amount < base - 0.004;
@@ -201,21 +197,21 @@ export function followerTiers(byTier: Map<string, TierResult>): string[] {
   return clubPriceVisible(byTier.get("Gold"), byTier.get("Basic")?.main?.amount ?? null) ? CLUB_FOLLOWERS : [];
 }
 
-async function fetchBenefits(id: string): Promise<BenefitsResult> {
+async function fetchBenefits(shop: Shop, id: string): Promise<BenefitsResult> {
   const byTier = new Map<string, TierResult>();
   const load = (t: TierDef): Promise<void> =>
-    fetchTier(id, t)
+    fetchTier(id, t, shop)
       .then((r) => {
         if (r) byTier.set(r.tier, r);
       })
       .catch(() => {});
   const done = (m: Map<string, TierResult>): BenefitsResult => ({
-    ...buildBenefits(m),
-    complete: FIRST_TIERS.every((t) => m.has(t.name)) && followerTiers(m).every((n) => m.has(n)),
+    ...buildBenefits(m, shop),
+    complete: firstTiers(shop).every((t) => m.has(t.name)) && followerTiers(m).every((n) => m.has(n)),
   });
   const all = (async () => {
-    await Promise.all(FIRST_TIERS.map(load));
-    await Promise.all(TIERS.filter((t) => followerTiers(byTier).includes(t.name)).map(load));
+    await Promise.all(firstTiers(shop).map(load));
+    await Promise.all(tiersFor(shop).filter((t) => followerTiers(byTier).includes(t.name)).map(load));
   })();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const inTime = await Promise.race([
@@ -231,8 +227,24 @@ async function fetchBenefits(id: string): Promise<BenefitsResult> {
   return { ...early, later: all.then(() => done(byTier)) };
 }
 
-export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
+// Alza's API gives ISIC the very same cashback price as Basic, so the ISIC discount is lost. When ISIC has a list price of its own and both
+// carry a cashback of the same amount, the price is worked out like for the other tiers: the ISIC price minus the cashback Basic gets.
+// The Alza-Benefit-Prices extension does the same.
+function isicCashback(isic: TierResult, basic: TierResult | undefined, shop: Shop): PriceCandidate | null {
+  const mine = isic.selected;
+  const theirs = basic?.selected;
+  if (!mine || !theirs || !isic.main || !basic?.main) return null;
+  if (!(mine.promo && mine.priceType === 1 && theirs.promo && theirs.priceType === 1 && mine.amount === theirs.amount)) return null;
+  if (!(isic.main.amount > 0 && basic.main.amount > 0 && isic.main.amount < basic.main.amount)) return null;
+  const cashback = basic.main.amount - theirs.amount;
+  const raw = isic.main.amount - cashback;
+  if (!(cashback > 0 && raw > 0)) return null;
+  return { amount: shop.currency === "EUR" ? Math.round(raw * 100) / 100 : Math.round(raw), promo: true, priceType: 1, name: mine.name, coupon: "" };
+}
 
+export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ): BenefitsResult {
+  const t = texts(shop.lang);
+  const money = (n: number): string => formatMoney(shop, n, true);
   const basic = byTier.get("Basic");
   const base = basic?.main?.amount ?? null;
   const entries: BenefitEntry[] = [];
@@ -240,7 +252,9 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
     base && base > amount ? ((base - amount) / base) * 100 : null;
   const shown = (amount: number, denominator: number | null = base): number | null => {
     const exact = denominator && denominator > amount ? ((denominator - amount) / denominator) * 100 : null;
-    return exact === null ? null : Math.floor(exact + 50 / denominator! + 1e-9);
+    // the printed prices are rounded to whole crowns or forints, euros to the cent, and the exact discount can be half a unit off
+    const half = shop.currency === "EUR" ? 0.005 : 0.5;
+    return exact === null ? null : Math.floor(exact + (half * 100) / denominator! + 1e-9);
   };
   // The club labels on Alza ("Gold Sleva -8 %") cut the exact discount to whole percent, measured from the crossed out price when the product is on sale.
   const clubBase = basic?.compare && base && basic.compare > base + 0.004 ? basic.compare : (basic?.main?.exact ?? base);
@@ -250,39 +264,42 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
   if (basic?.compare && base && basic.compare > base + 0.004) {
     entries.push({
       kind: "sale",
-      label: "Sleva",
+      label: t.sale,
       price: base,
-      priceText: fmtCzk2(base),
+      priceText: money(base),
       percent: ((basic.compare - base) / basic.compare) * 100,
       percentShown: shown(base, basic.compare),
-      wasPriceText: fmtCzk2(basic.compare),
+      wasPriceText: money(basic.compare),
     });
   }
 
+  // Alza names its promotions in Czech in every shop. Czech keeps the name as it comes, the others say the standard ones in their own language.
+  const own = (name: string, local: string, keep = false): string => (shop.code === "cz" || keep ? name || local : local);
   for (const pr of basic?.promos ?? []) {
     if (!(base && pr.amount < base - 0.004)) continue;
     let kind: BenefitEntry["kind"];
     let label: string;
     if (pr.priceType === 4) {
       kind = "alzaplus";
-      label = "S AlzaPlus+";
+      label = t.alzaplus;
     } else if (pr.coupon) {
       kind = "coupon";
-      label = `S kódem ${pr.coupon}`;
+      label = t.couponLabel(pr.coupon);
     } else if (pr.priceType === 2) {
       kind = "tradein";
-      label = pr.name || "S výkupním bonusem";
+      label = own(pr.name, t.tradein);
     } else if (pr.priceType === 1) {
       kind = "cashback";
-      label = pr.name || "S Cashback";
+      label = own(pr.name, t.cashback);
     } else {
       kind = "promo";
-      label = pr.name || "Akční cena";
+      // a promotion with a name of its own keeps it, the standard Czech one is said in the language of the shop
+      label = pr.name && pr.name !== texts("cs").promo ? own(pr.name, t.promo, true) : t.promo;
     }
-    const fromCode = kind === "coupon" ? Number(/(d{1,2})$/.exec(pr.coupon ?? "")?.[1]) : NaN;
+    const fromCode = kind === "coupon" ? Number(/(\d{1,2})$/.exec(pr.coupon ?? "")?.[1]) : NaN;
     const calculated = shown(pr.amount);
     const percentShown = Number.isFinite(fromCode) && calculated !== null && Math.abs(fromCode - calculated) <= 1 ? fromCode : calculated;
-    entries.push({ kind, label, price: pr.amount, priceText: fmtCzk2(pr.amount), percent: percent(pr.amount), percentShown });
+    entries.push({ kind, label, price: pr.amount, priceText: money(pr.amount), percent: percent(pr.amount), percentShown, ...(kind === "coupon" ? { coupon: pr.coupon } : {}) });
   }
 
   interface ClubRow {
@@ -297,13 +314,14 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
     const t = byTier.get(name);
     if (!t || t.hidden || !t.main || !t.selected) continue;
     if (!(base && t.main.amount < base - 0.004)) continue;
-    const lowered = t.selected.amount < t.main.amount - 0.004;
+    const selected = (name === "ISIC" ? isicCashback(t, basic, shop) : null) ?? t.selected;
+    const lowered = selected.amount < t.main.amount - 0.004;
     rows.push({
       names: [name],
       listPrice: t.main.amount,
-      best: t.selected.amount,
-      bestExact: t.selected.exact ?? t.selected.amount,
-      promo: lowered ? t.selected : null,
+      best: selected.amount,
+      bestExact: selected.exact ?? selected.amount,
+      promo: lowered ? selected : null,
     });
   }
 
@@ -332,10 +350,10 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
       kind: "tier",
       label: r.names.join("/"),
       price: r.best,
-      priceText: fmtCzk2(r.best),
+      priceText: money(r.best),
       percent: percent(r.best),
       percentShown: clubShown(r.bestExact),
-      ...(r.promo ? { wasPriceText: fmtCzk2(r.listPrice), note: promoTag(r.promo) } : {}),
+      ...(r.promo ? { wasPriceText: money(r.listPrice), note: promoTag(r.promo, shop) } : {}),
     });
   }
 
@@ -349,17 +367,19 @@ export function buildBenefits(byTier: Map<string, TierResult>): BenefitsResult {
     tier: 5,
   };
   entries.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.price - b.price);
-  return { entries: entries.slice(0, 8), complete: byTier.size === TIERS.length };
+  return { entries: entries.slice(0, 8), complete: byTier.size === tiersFor(shop).length };
 }
 
 // JSON-LD itemCondition says whether it is second hand, the grade is only in the stock label.
-export function conditionText(itemCondition: unknown, html: string): string | null {
+// The Czech page names the grade in Czech; the other shops are only told apart as used.
+export function conditionText(itemCondition: unknown, html: string, shop: Shop = CZ): string | null {
+  const t = texts(shop.lang);
   const kind = String(itemCondition ?? "").split("/").pop();
-  if (kind === "RefurbishedCondition") return "Repasované";
-  if (kind === "DamagedCondition") return "Poškozené";
+  if (kind === "RefurbishedCondition") return t.refurbished;
+  if (kind === "DamagedCondition") return t.damaged;
   if (kind !== "UsedCondition") return null;
-  const grade = /class="stcStock[^"]*"[^>]*title="\s*(Rozbaleno|Zánovní|Použité)/.exec(html)?.[1];
-  return grade ?? "Použité";
+  const grade = shop.code === "cz" ? /class="stcStock[^"]*"[^>]*title="\s*(Rozbaleno|Zánovní|Použité)/.exec(html)?.[1] : undefined;
+  return grade ?? t.used;
 }
 
 export class UpstreamError extends Error {
@@ -381,13 +401,14 @@ function httpsUrlOn(value: string, domain: string): string | null {
   }
 }
 
-async function getHtml(path: string): Promise<string> {
-  const res = await fetchUrl(`https://www.alza.cz${path}`, {
+async function getHtml(shop: Shop, path: string): Promise<string> {
+  const res = await fetchUrl(`https://${shop.host}${path}`, {
     headers: {
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+      "Accept-Language": `${shop.locale},${shop.lang};q=0.9,en;q=0.8`,
     },
     timeoutMs: 25000,
+    country: shop.country,
   });
   if (res.status !== 200) throw new UpstreamError(res.status, `alza responded HTTP ${res.status} (via ${res.via})`);
   return res.body;
@@ -428,21 +449,17 @@ function extractProductJsonLd(html: string): any | null {
 }
 
 export async function fetchKodList(pathname: string, requested: number): Promise<KodList | null> {
-  return parseKodList(await getHtml(pathname), requested);
+  return parseKodList(await getHtml(CZ, pathname), requested);
 }
 
 // Alza redirects a bare slug such as /gaming/hogwarts-legacy to one concrete product page; its JSON-LD names the canonical -d<id> link.
-export async function resolveProductPath(path: string): Promise<Parsed | null> {
-  const p = extractProductJsonLd(await getHtml(path));
+export async function resolveProductPath(path: string, shop: Shop = CZ): Promise<Parsed | null> {
+  const p = extractProductJsonLd(await getHtml(shop, path));
   if (!p) return null;
   const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
   const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
-  const url = claimed && httpsUrlOn(claimed, "alza.cz");
+  const url = claimed && httpsUrlOn(claimed, `alza.${shop.tld}`);
   return url ? parseProductPath(new URL(url).pathname) : null;
-}
-
-function fmtCzk(n: number): string {
-  return new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 }).format(n).replace(/\u00A0/g, " ");
 }
 
 export function slugTitle(path: string): string {
@@ -481,17 +498,19 @@ export async function fetchProduct(
   id: string,
   path: string,
   onLateBenefits?: (benefits: BenefitEntry[], complete: boolean) => void,
+  shop: Shop = CZ,
 ): Promise<ProductData> {
+  const t = texts(shop.lang);
   const benefitsStarted = Date.now();
   // The id is already known from the link, so the price tiers load while the page itself is still on its way.
   const benefitsPromise: Promise<BenefitsResult> = BENEFITS_ENABLED
-    ? fetchBenefits(id).catch((e) => {
+    ? fetchBenefits(shop, id).catch((e) => {
         console.error(`[benefits] ${id}: ${e instanceof Error ? e.message : e}`);
         return { entries: [], complete: false };
       })
     : Promise.resolve({ entries: [], complete: true });
 
-  const html = await getHtml(path);
+  const html = await getHtml(shop, path);
   const p = extractProductJsonLd(html);
   if (!p) throw new Error("no Product JSON-LD found on the page");
 
@@ -523,11 +542,12 @@ export async function fetchProduct(
     image = String(im.url);
   }
 
+  const condition = conditionText(offers?.itemCondition, html, shop);
   const availability = offers?.availability ? String(offers.availability).split("/").pop()! : "unknown";
 
   const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
-  const canonicalUrl = (claimed && httpsUrlOn(claimed, "alza.cz")) || `https://www.alza.cz${path}`;
-  if (image && !httpsUrlOn(image, "alza.cz")) image = null;
+  const canonicalUrl = (claimed && httpsUrlOn(claimed, `alza.${shop.tld}`)) || `https://${shop.host}${path}`;
+  if (image && !httpsUrlOn(image, "alza.cz") && !httpsUrlOn(image, `alza.${shop.tld}`)) image = null;
 
   let benefits: BenefitEntry[] = [];
   let partial = true;
@@ -564,10 +584,10 @@ export async function fetchProduct(
     id,
     name: decodeEntities(String(p.name ?? slugTitle(path))),
     price,
-    priceText: price === null ? null : `${fmtCzk(price)} Kč`,
+    priceText: price === null ? null : formatMoney(shop, price),
     availability,
-    availabilityText: AVAILABILITY_CS[availability] ?? "Neznámá dostupnost",
-    ...(conditionText(offers?.itemCondition, html) ? { condition: conditionText(offers?.itemCondition, html)! } : {}),
+    availabilityText: t.availability[availability] ?? t.unknownAvailability,
+    ...(condition ? { condition } : {}),
     rating,
     ratingCount,
     brand: p.brand?.name ? String(p.brand.name) : null,
@@ -577,5 +597,6 @@ export async function fetchProduct(
     benefits,
     ...(partial ? { partial: true as const } : {}),
     fetchedAt: new Date().toISOString(),
+    ...(shop.code === "cz" ? {} : { shop: shop.code }),
   };
 }
