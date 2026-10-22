@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
 import { texts } from "./i18n.ts";
@@ -448,8 +451,28 @@ function extractProductJsonLd(html: string): any | null {
   return null;
 }
 
+// A page that parses to nothing is kept (the newest few) under data/debug, so its real markup can be looked at.
+function dumpUnparsed(kind: string, pathname: string, html: string): void {
+  const count = (needle: string): number => html.split(needle).length - 1;
+  console.warn(
+    `[${kind}] nothing parsed from ${pathname}: ${html.length} bytes, box-row=${count('class="box-row"')}, js-box-link=${count("js-box-link")}, ` +
+      `"Objednací kód"=${count("Objednací kód")}, "-d"=${count(".htm")}, title=${JSON.stringify(/<title>([^<]{0,80})/i.exec(html)?.[1]?.trim() ?? "")}`,
+  );
+  try {
+    const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../data/debug");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${kind}-${Date.now()}.html`), html.slice(0, 600_000));
+    const old = fs.readdirSync(dir).filter((f) => f.startsWith(`${kind}-`)).sort().slice(0, -5);
+    for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
+  } catch {
+  }
+}
+
 export async function fetchKodList(pathname: string, requested: number): Promise<KodList | null> {
-  return parseKodList(await getHtml(CZ, pathname), requested);
+  const html = await getHtml(CZ, pathname);
+  const list = parseKodList(html, requested);
+  if (!list) dumpUnparsed("kod", pathname, html);
+  return list;
 }
 
 // Alza redirects a bare slug such as /gaming/hogwarts-legacy to one concrete product page; its JSON-LD names the canonical -d<id> link.
