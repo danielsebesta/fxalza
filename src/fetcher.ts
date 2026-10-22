@@ -11,6 +11,8 @@ interface FetchOpts {
   headers?: Record<string, string>;
   timeoutMs?: number;
   prefer?: string[];
+  // the country the request should come from where a provider can choose, the shop's own
+  country?: string;
 }
 
 interface Provider {
@@ -132,7 +134,7 @@ const providers: Provider[] = [
   {
     name: "brightdata",
     enabled: () => brightdata.available(),
-    run: (url, _opts, timeoutMs) =>
+    run: (url, opts, timeoutMs) =>
       brightdata.run(async (key) => {
         const res = await fetch("https://api.brightdata.com/request", {
           method: "POST",
@@ -141,7 +143,7 @@ const providers: Provider[] = [
             zone: process.env.BRIGHTDATA_ZONE ?? "web_unlocker1",
             url,
             format: "raw",
-            country: "cz",
+            country: (opts.country ?? "CZ").toLowerCase(),
           }),
           signal: AbortSignal.timeout(timeoutMs),
         });
@@ -151,9 +153,9 @@ const providers: Provider[] = [
   {
     name: "scrape.do",
     enabled: () => scrapedo.available(),
-    run: (url, _opts, timeoutMs) =>
+    run: (url, opts, timeoutMs) =>
       scrapedo.run(async (key) => {
-        const api = `https://api.scrape.do/?token=${key}&url=${encodeURIComponent(url)}&super=true&geoCode=cz`;
+        const api = `https://api.scrape.do/?token=${key}&url=${encodeURIComponent(url)}&super=true&geoCode=${(opts.country ?? "CZ").toLowerCase()}`;
         const res = await fetch(api, { signal: AbortSignal.timeout(timeoutMs) });
         return { status: res.status, body: await res.text() };
       }),
@@ -161,12 +163,12 @@ const providers: Provider[] = [
   {
     name: "firecrawl",
     enabled: () => firecrawl.available(),
-    run: (url, _opts, timeoutMs) =>
+    run: (url, opts, timeoutMs) =>
       firecrawl.run(async (key) => {
         const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
           method: "POST",
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ url, formats: ["rawHtml"], location: { country: "CZ" }, timeout: timeoutMs }),
+          body: JSON.stringify({ url, formats: ["rawHtml"], location: { country: opts.country ?? "CZ" }, timeout: timeoutMs }),
           signal: AbortSignal.timeout(timeoutMs + 5000),
         });
         const j = (await res.json()) as { success?: boolean; data?: { rawHtml?: string; metadata?: { statusCode?: number } } };

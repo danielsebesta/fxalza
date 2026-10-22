@@ -7,7 +7,10 @@ import { hasCacheBustSuffix, isExtensionHost, parseProductPath, type Parsed } fr
 import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
-import { DEMO_CSP, DEMO_HTML, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, SITEMAP_XML, landingHtml, problemHtml } from "./landing.ts";
+import { texts } from "./i18n.ts";
+import { ALL_SHOPS, CZ, SITE_APEX, shopByTld, shopOfHost, siteHost, siteUrl, type Shop } from "./shops.ts";
+import { DEMO_CSP, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, demoHtml, landingCsp, landingHtml, problemHtml, robotsTxt, sitemapXml } from "./landing.ts";
+import { landingTexts } from "./landing-i18n.ts";
 import { allowFetch, anonymizedIp, identify, rateTier, type Requester } from "./ratelimit.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
@@ -17,20 +20,27 @@ const HOST = process.env.HOST ?? "127.0.0.1";
 const IMG_W = process.env.IMG_W ?? "600";
 const BOT_RE =
   /(bot|facebook|embed|got|firefox\/92|firefox\/38|chrome\/96\.0\.4664\.110|curl|wget|go-http|yahoo|generator|whatsapp|revoltchat|preview|link|proxy|vkshare|images|analyzer|index|crawl|spider|python|node|deno|mastodon|http\.rb|ruby|bun\/|fiddler|iframely|steamchaturllookup|bluesky|matrix-media-repo|cardyb|resolver|util|feedly|rss|reader|atom|thunderbird|axios)/i;
-const APEX = new URL(PUBLIC_URL).hostname.toLowerCase();
+const APEX = SITE_APEX;
 const SERVED_SUBDOMAINS = new Set(["www", "m"]);
 const EXTENSION_REPO = "https://github.com/dexnis-dev/Alza-Benefit-Prices";
 
 const UTM = "utm_source=fxalza&utm_medium=discord";
-const DISCLAIMER = "Neoficiální nástroj, s Alza.cz a.s. nijak nesouvisí.\n„Alza“ a „Alza.cz“ jsou ochranné známky společnosti Alza.cz a.s.";
-
 const ALZA_HOST = /^\/(?:https?:\/+)?((?:[a-z0-9-]+\.)*alza\.(cz|sk|de|at|ch|hu|pl|co\.uk))(\/.*)?$/i;
 
-function unsupportedHtml(tld: string, target: string): string {
-  const title = `fxalza podporuje jen Alza.cz`;
-  const desc = `Odkaz na alza.${tld} zatím nejde zobrazit, funguje jen Alza.cz (české produkty).`;
+const SUPPORTED_DOMAINS = ALL_SHOPS.map((s) => `alza.${s.tld}`);
+
+// The same product id can be sold in several shops at different prices, so everything but the Czech shop is kept apart by a prefix.
+// Czech keys stay the bare id so the cache written before the other shops existed is still good.
+function keyOf(shop: Shop, id: string): string {
+  return shop.code === "cz" ? id : `${shop.code}:${id}`;
+}
+
+function unsupportedHtml(shop: Shop, tld: string, target: string): string {
+  const t = landingTexts(shop.lang).problems;
+  const title = t.unsupportedTitle;
+  const desc = t.unsupportedBody(tld, SUPPORTED_DOMAINS.map((d) => d.replace(/^alza/, "Alza")).join(", "));
   return `<!DOCTYPE html>
-<html lang="cs">
+<html lang="${shop.locale}">
 <head>
   <meta charset="utf-8">
   <title>${esc(title)}</title>
@@ -42,33 +52,39 @@ function unsupportedHtml(tld: string, target: string): string {
   <meta http-equiv="refresh" content="0;url=${esc(target)}">
   <meta name="theme-color" content="#e5484d">
 </head>
-<body><p>${esc(desc)}</p><p><a href="${esc(target)}">Přejít na Alzu</a></p></body>
+<body><p>${esc(desc)}</p><p><a href="${esc(target)}">${esc(t.goToAlza)}</a></p></body>
 </html>`;
 }
 
 const EMBED_DEADLINE_MS = Number(process.env.EMBED_DEADLINE_MS ?? 5000);
 const inflight = new Map<string, Promise<ProductData>>();
 
-function refresh(id: string, path: string): Promise<ProductData> {
-  let p = inflight.get(id);
+function refresh(shop: Shop, id: string, path: string): Promise<ProductData> {
+  const key = keyOf(shop, id);
+  let p = inflight.get(key);
   if (!p) {
-    p = fetchProduct(id, path, (benefits, complete) => {
-      const current = getCached(id, true);
-      if (!current) return;
-      const { partial: _, ...rest } = current;
-      putCached(id, { ...rest, benefits, ...(complete ? {} : { partial: true as const }) });
-    })
+    p = fetchProduct(
+      id,
+      path,
+      (benefits, complete) => {
+        const current = getCached(key, true);
+        if (!current) return;
+        const { partial: _, ...rest } = current;
+        putCached(key, { ...rest, benefits, ...(complete ? {} : { partial: true as const }) });
+      },
+      shop,
+    )
       .then((d) => {
-        negative.delete(id);
-        putCached(id, d);
+        negative.delete(key);
+        putCached(key, d);
         return d;
       })
       .catch((e) => {
-        remember(id, e);
+        remember(key, e);
         throw e;
       })
-      .finally(() => inflight.delete(id));
-    inflight.set(id, p);
+      .finally(() => inflight.delete(key));
+    inflight.set(key, p);
   }
   return p;
 }
@@ -103,29 +119,30 @@ interface ProductResult {
   missing?: boolean;
 }
 
-async function getProduct(id: string, path: string, who: Requester, bust = false, trace?: { cache?: string }): Promise<ProductResult> {
-  const hit = peekCached(id);
+async function getProduct(shop: Shop, id: string, path: string, who: Requester, bust = false, trace?: { cache?: string }): Promise<ProductResult> {
+  const key = keyOf(shop, id);
+  const hit = peekCached(key);
   if (trace) trace.cache = hit?.state ?? "miss";
-  console.log(`[product] ${id} cache ${hit?.state ?? "miss"}`);
+  console.log(`[product] ${key} cache ${hit?.state ?? "miss"}`);
   // A link the user changed on purpose gets another try at a partial result instead of waiting for it to expire.
   if (hit?.state === "fresh" && !(bust && hit.data.partial)) return { data: hit.data, stale: false };
-  const bad = hit?.state === "stale" ? null : recalled(id);
+  const bad = hit?.state === "stale" ? null : recalled(key);
   if (bad) {
-    const old = getCached(id, true);
+    const old = getCached(key, true);
     return { data: old, stale: old !== null, missing: bad.missing && old === null };
   }
-  const mayFetch = (): boolean => inflight.has(id) || allowFetch(who.id, rateTier(who));
+  const mayFetch = (): boolean => inflight.has(key) || allowFetch(who.id, rateTier(who));
   if (hit?.state === "stale") {
-    if (mayFetch()) refresh(id, path).catch((e) => console.error(`[fetch] ${id} background refresh failed: ${e instanceof Error ? e.message : e}`));
+    if (mayFetch()) refresh(shop, id, path).catch((e) => console.error(`[fetch] ${key} background refresh failed: ${e instanceof Error ? e.message : e}`));
     return { data: hit.data, stale: false };
   }
   if (!mayFetch()) {
-    console.warn(`[rate] ${rateTier(who)} ${who.id} limited on ${id}`);
-    const old = getCached(id, true);
+    console.warn(`[rate] ${rateTier(who)} ${who.id} limited on ${key}`);
+    const old = getCached(key, true);
     return old ? { data: old, stale: true } : { data: null, stale: false, limited: true };
   }
   try {
-    const pending = refresh(id, path);
+    const pending = refresh(shop, id, path);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const data = await Promise.race([
       pending,
@@ -135,13 +152,13 @@ async function getProduct(id: string, path: string, who: Requester, bust = false
     ]);
     clearTimeout(timer);
     if (data) return { data, stale: false };
-    console.warn(`[product] ${id} not ready after ${EMBED_DEADLINE_MS}ms, answering with what we have`);
-    pending.catch((e) => console.error(`[fetch] ${id} failed after the deadline: ${e instanceof Error ? e.message : e}`));
-    const old = getCached(id, true);
+    console.warn(`[product] ${key} not ready after ${EMBED_DEADLINE_MS}ms, answering with what we have`);
+    pending.catch((e) => console.error(`[fetch] ${key} failed after the deadline: ${e instanceof Error ? e.message : e}`));
+    const old = getCached(key, true);
     return { data: old, stale: old !== null };
   } catch (e) {
-    console.error(`[fetch] ${id} failed: ${e instanceof Error ? e.message : e}`);
-    const old = getCached(id, true);
+    console.error(`[fetch] ${key} failed: ${e instanceof Error ? e.message : e}`);
+    const old = getCached(key, true);
     const missing = e instanceof UpstreamError && (e.status === 404 || e.status === 410);
     return { data: old, stale: old !== null, missing: missing && old === null };
   }
@@ -154,33 +171,35 @@ const slugs = new Map<string, { until: number; parsed: Parsed | null }>();
 const slugPending = new Map<string, Promise<Parsed | null>>();
 
 // A path with no product id (e.g. /gaming/hogwarts-legacy) may still be an Alza link that redirects to one product, so crawlers get one upstream look at it.
-async function resolveSlug(pathname: string, who: Requester): Promise<Parsed | null> {
+async function resolveSlug(shop: Shop, pathname: string, who: Requester): Promise<Parsed | null> {
+  const slugKey = `${shop.code}${pathname}`;
   if (!/^\/[A-Za-z0-9._~%/-]{2,200}$/.test(pathname) || /\.(?!htm$)[A-Za-z0-9]{1,5}$/i.test(pathname)) return null;
-  const known = slugs.get(pathname);
+  const known = slugs.get(slugKey);
   if (known && known.until > Date.now()) return known.parsed;
-  const pending = slugPending.get(pathname);
+  const pending = slugPending.get(slugKey);
   if (pending) return pending;
   if (!allowFetch(who.id, rateTier(who))) return null;
-  const p = resolveProductPath(pathname)
+  const p = resolveProductPath(pathname, shop)
     .catch((e) => {
       console.warn(`[slug] ${pathname} not resolved: ${e instanceof Error ? e.message : e}`);
       return null;
     })
     .then((parsed) => {
-      slugs.delete(pathname);
-      slugs.set(pathname, { until: Date.now() + (parsed ? SLUG_TTL_MS : SLUG_MISS_TTL_MS), parsed });
+      slugs.delete(slugKey);
+      slugs.set(slugKey, { until: Date.now() + (parsed ? SLUG_TTL_MS : SLUG_MISS_TTL_MS), parsed });
       while (slugs.size > SLUG_MAX) slugs.delete(slugs.keys().next().value!);
       if (parsed) console.log(`[slug] ${pathname} -> ${parsed.id}`);
       return parsed;
     })
-    .finally(() => slugPending.delete(pathname));
-  slugPending.set(pathname, p);
+    .finally(() => slugPending.delete(slugKey));
+  slugPending.set(slugKey, p);
   return p;
 }
 
 function sendProblem(
   req: http.IncomingMessage,
   res: http.ServerResponse,
+  shop: Shop,
   isBot: boolean,
   status: number,
   title: string,
@@ -196,7 +215,7 @@ function sendProblem(
     vary: "User-Agent",
     ...extra,
   });
-  res.end(req.method === "HEAD" ? undefined : problemHtml(title, message));
+  res.end(req.method === "HEAD" ? undefined : problemHtml(title, message, shop));
 }
 
 function esc(s: string): string {
@@ -232,27 +251,28 @@ function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
   const was = e.wasPriceText ? `${e.wasPriceText} → ` : "";
   const name = e.note ? `${e.label} + ${e.note}` : e.label;
   if (!rich) return `${benefitEmoji(e, custom)} ${name} ${was}${e.priceText}${pct}`;
-  const label = name.replace(/^(S kódem )([^\s`]+)$/, "$1`$2`");
+  // entries cached before the code was kept next to the label have it as the last word
+  const code = e.kind === "coupon" ? (e.coupon ?? name.split(" ").pop()) : undefined;
+  const label = code ? name.replace(code, `\`${code}\``) : name;
   return `${benefitEmoji(e, custom)} ${label} ${was}**${e.priceText}**${pct}`;
 }
-
-const PARTIAL_NOTICE = "Některé ceny se nestihly načíst. Připiš za odkaz cokoliv (třeba písmeno) a pošli ho znovu.";
 
 function stateText(p: ProductData): string {
   if (!p.condition) return p.availabilityText;
   return `${p.condition}, ${p.availabilityText.charAt(0).toLowerCase()}${p.availabilityText.slice(1)}`;
 }
 
-function componentEmbedJson(p: ProductData, canonical: string, img: string | null, carried: string, customEmoji: boolean): string | null {
+function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: string | null, carried: string, customEmoji: boolean): string | null {
+  const t = texts(shop.lang);
   const titleUrl = carried ? outbound(canonical, carried) : canonical;
   const titleLine = `### **[${mdEsc(p.name)}](${titleUrl})** (${stateText(p)})`;
   const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale");
   const priceLine =
-    p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} Cena **${p.priceText}**` : null;
+    p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} ${t.price} **${p.priceText}**` : null;
   const benefitLines = [
     ...(priceLine ? [priceLine] : []),
     ...(p.benefits ?? []).map((b) => benefitLine(b, true, customEmoji)),
-    ...(p.partial ? [`-# ${PARTIAL_NOTICE}`] : []),
+    ...(p.partial ? [`-# ${t.partial}`] : []),
   ];
   const humanUrl = outbound(canonical, carried);
   const historyUrl = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(canonical)}`;
@@ -260,7 +280,7 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
   const desc = p.description ? mdEsc(p.description) : "";
 
   const build = (lines: string[], withThumb: boolean, withDesc = true): string => {
-    const parts = ["-# Alza.cz", titleLine];
+    const parts = [`-# Alza.${shop.tld}`, titleLine];
     if (withDesc && desc) {
       parts.push(desc);
       if (lines.length > 0) parts.push("");
@@ -284,10 +304,10 @@ function componentEmbedJson(p: ProductData, canonical: string, img: string | nul
           type: 2,
           style: 5,
           url: humanUrl,
-          label: "Otevřít na Alze",
+          label: t.open,
           ...(customEmoji && emojiRef("alza_logo") ? { emoji: emojiRef("alza_logo") } : {}),
         },
-        ...(historyUrl.length <= 512 ? [{ type: 2, style: 5, url: historyUrl, label: "Hlídač shopů", ...(customEmoji ? { emoji: emojiRef("hlidac_shopu") ?? { name: "📈" } } : {}) }] : []),
+        ...(shop.history && historyUrl.length <= 512 ? [{ type: 2, style: 5, url: historyUrl, label: "Hlídač shopů", ...(customEmoji ? { emoji: emojiRef("hlidac_shopu") ?? { name: "📈" } } : {}) }] : []),
       ],
     });
     return JSON.stringify({ component: { type: 17, accent_color: 1011653, components } }).replace(
@@ -313,11 +333,12 @@ function shortName(name: string, max = 70): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
 }
 
-function embedHtml(p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true): string {
+function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true): string {
+  const t = texts(shop.lang);
   const slugged = slugTitle(path);
   const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
-  const fallbackTitle = slugged === "Produkt" && productId ? `Produkt z Alzy (${productId})` : slugged;
-  const canonical = p?.canonicalUrl ?? `https://www.alza.cz${path}`;
+  const fallbackTitle = slugged === "Produkt" && productId ? t.productFromAlza(productId) : slugged;
+  const canonical = p?.canonicalUrl ?? `https://${shop.host}${path}`;
 
   const offers = (p?.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
   const cheapest = offers.reduce<BenefitEntry | null>((best, b) => (best === null || b.price < best.price ? b : best), null);
@@ -330,10 +351,10 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
   if (p) {
     if (p.priceText && !offers.some((b) => b.kind === "sale")) parts.push(p.priceText);
     for (const b of customEmoji ? offers : p.benefits ?? []) parts.push(benefitLine(b));
-    if (stale) parts.push("data mohou být starší");
-    if (p.partial) parts.push(PARTIAL_NOTICE);
+    if (stale) parts.push(t.stale);
+    if (p.partial) parts.push(t.partial);
   } else {
-    parts.push(missing ? "Tenhle produkt na Alze už nenajdeme, odkaz je nejspíš neplatný." : "Produkt se nepodařilo načíst, zkus odkaz otevřít přímo na Alze.");
+    parts.push(missing ? t.missing : t.failed);
   }
   let desc = parts.join(" • ");
   if (p?.description) {
@@ -348,13 +369,13 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
   }
 
   const img = p?.image ? `${p.image}?width=${IMG_W}&height=${IMG_W}` : null;
-  const componentJson = p && customEmoji ? componentEmbedJson(p, canonical, img, carried, true) : null;
+  const componentJson = p && customEmoji ? componentEmbedJson(shop, p, canonical, img, carried, true) : null;
 
   const tags = [
     `<meta charset="utf-8">`,
-    `<title>${esc(title)} | ${p ? "Alza.cz" : "fxalza"}</title>`,
+    `<title>${esc(title)} | ${p ? `Alza.${shop.tld}` : "fxalza"}</title>`,
     `<meta property="og:type" content="product">`,
-    `<meta property="og:site_name" content="${p ? "Alza.cz" : "fxalza"}">`,
+    `<meta property="og:site_name" content="${p ? `Alza.${shop.tld}` : "fxalza"}">`,
     `<meta property="og:title" content="${esc(title)}">`,
     `<meta name="description" content="${esc(desc)}">`,
     `<meta property="og:description" content="${esc(desc)}">`,
@@ -362,10 +383,10 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     img ? `<meta property="og:image:width" content="${IMG_W}">` : "",
     img ? `<meta property="og:image:height" content="${IMG_W}">` : "",
     customEmoji ? `<meta property="og:url" content="${esc(canonical)}">` : "",
-    `<meta property="og:locale" content="cs_CZ">`,
+    `<meta property="og:locale" content="${shop.locale.replace("-", "_")}">`,
     img ? `<meta property="og:image:alt" content="${esc(title)}">` : "",
     p?.price != null ? `<meta property="product:price:amount" content="${p.price}">` : "",
-    p?.price != null ? `<meta property="product:price:currency" content="CZK">` : "",
+    p?.price != null ? `<meta property="product:price:currency" content="${shop.currency}">` : "",
     componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : "",
     customEmoji ? `<meta http-equiv="refresh" content="0;url=${esc(outbound(canonical, carried))}">` : "",
     `<meta name="twitter:card" content="${img ? "summary_large_image" : "summary"}">`,
@@ -383,12 +404,12 @@ function embedHtml(p: ProductData | null, path: string, stale: boolean, carried 
     `<p>${esc(desc)}</p>`,
     benefitRows.length > 0 ? `<ul>${benefitRows.join("")}</ul>` : "",
     img ? `<img src="${esc(img)}" width="240" alt="">` : "",
-    `<p><a href="${esc(outbound(canonical, carried))}">Přejít na Alza.cz</a></p>`,
-    `<p class="note">${DISCLAIMER.replace("\n", " ")}</p>`,
+    `<p><a href="${esc(outbound(canonical, carried))}">${t.goTo} Alza.${shop.tld}</a></p>`,
+    `<p class="note">${t.disclaimer.replace("{tld}", shop.tld).replace("\n", " ")}</p>`,
   ].filter(Boolean);
 
   return `<!DOCTYPE html>
-<html lang="cs">
+<html lang="${shop.locale}">
 <head>
   ${tags}
   <style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#222}.note{color:#888;font-size:13px}</style>
@@ -465,13 +486,6 @@ for (const family of ["roboto"]) {
   }
 }
 
-const ROBOTS_TXT = `User-agent: *
-Allow: /$
-Disallow: /
-
-Sitemap: ${PUBLIC_URL}/sitemap.xml
-`;
-
 function hostOf(req: http.IncomingMessage): string {
   return String(req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase().slice(0, 60);
 }
@@ -491,6 +505,9 @@ const server = http.createServer(async (req, res) => {
   if (who.unlisted) console.log(`[discord] Discordbot user agent from an address outside the published ranges (${who.id})`);
   let logged = "";
   let evt: TrackEvent | null = null;
+  // "sk.fxalza.cz" is the Slovak shop, the bare apex, www and m are the Czech one; a /alza.sk/... path can still change it below
+  const hostShop = shopOfHost(hostOf(req), APEX);
+  let shop: Shop = hostShop ?? CZ;
 
   try {
     if (req.method === "OPTIONS") {
@@ -515,8 +532,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const host = String(req.headers.host ?? "").replace(/:d+$/, "").toLowerCase();
-    if (!isBot && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {
+    const host = hostOf(req);
+    if (!isBot && !hostShop && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {
       const p = parseProductPath(u.pathname, u.searchParams.get("dq"));
       res.writeHead(302, { Location: p ? outbound(`https://www.alza.cz${p.path}`, carriedQuery(u.searchParams)) : `${PUBLIC_URL}/`, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
@@ -539,15 +556,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (u.pathname === "/robots.txt") {
-      sendStatic(req, res, ROBOTS_TXT, "text/plain; charset=utf-8", { "x-robots-tag": "all" }, 3600);
+      sendStatic(req, res, robotsTxt(shop), "text/plain; charset=utf-8", { "x-robots-tag": "all" }, 3600);
       return;
     }
     if (u.pathname === "/demo") {
-      sendStatic(req, res, DEMO_HTML, "text/html; charset=utf-8", { "content-security-policy": DEMO_CSP, "x-frame-options": "SAMEORIGIN", "x-robots-tag": "noindex" }, 600);
+      sendStatic(req, res, demoHtml(shop), "text/html; charset=utf-8", { "content-security-policy": DEMO_CSP, "x-frame-options": "SAMEORIGIN", "x-robots-tag": "noindex" }, 600);
       return;
     }
     if (u.pathname === "/sitemap.xml") {
-      sendStatic(req, res, SITEMAP_XML, "application/xml; charset=utf-8", { "x-robots-tag": "all" }, 3600);
+      sendStatic(req, res, sitemapXml(shop), "application/xml; charset=utf-8", { "x-robots-tag": "all" }, 3600);
       return;
     }
     if (u.pathname === "/llms.txt") {
@@ -558,39 +575,41 @@ const server = http.createServer(async (req, res) => {
     const alza = ALZA_HOST.exec(pathname);
     if (alza) {
       const tld = alza[2]!.toLowerCase();
-      if (tld === "cz") {
+      const linked = shopByTld(tld);
+      if (linked) {
+        shop = linked;
         pathname = alza[3] ?? "/";
       } else {
         const target = `https://${alza[1]!.toLowerCase()}${alza[3] ?? "/"}${u.search}`;
         evt = { url: logged, name: "unsupported_domain", data: { tld, kind: isBot ? platformOf(ua) : "human" } };
         if (u.searchParams.get("format") === "json") {
           res.writeHead(422, { "content-type": "application/json; charset=utf-8", ...CORS_HEADERS });
-          res.end(JSON.stringify({ error: "unsupported_domain", domain: `alza.${tld}`, supported: ["alza.cz"] }));
+          res.end(JSON.stringify({ error: "unsupported_domain", domain: `alza.${tld}`, supported: SUPPORTED_DOMAINS }));
         } else if (!isBot) {
           res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
           res.end();
         } else {
           res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
-          res.end(req.method === "HEAD" ? undefined : unsupportedHtml(tld, target));
+          res.end(req.method === "HEAD" ? undefined : unsupportedHtml(shop, tld, target));
         }
         return;
       }
     }
     let parsed = parseProductPath(pathname, u.searchParams.get("dq"));
-    if (!parsed && isBot) parsed = await resolveSlug(pathname, who);
+    if (!parsed && isBot) parsed = await resolveSlug(shop, pathname, who);
     if (!parsed) {
       if (pathname === "/" && !alza) {
         if (!isBot) evt = { url: "/", data: visitorData(req, who) };
         sendStatic(
           req,
           res,
-          landingHtml(String(req.headers.host ?? "fxalza.cz"), DISCLAIMER),
+          landingHtml(shop),
           "text/html; charset=utf-8",
           {
-            "content-security-policy": LANDING_CSP,
+            "content-security-policy": landingCsp(shop.lang),
             "x-frame-options": "DENY",
             "x-robots-tag": "index, follow",
-            link: `<${PUBLIC_URL}/>; rel="canonical"`,
+            link: `<${siteUrl(shop)}/>; rel="canonical"`,
           },
           600,
         );
@@ -603,10 +622,11 @@ const server = http.createServer(async (req, res) => {
           sendProblem(
             req,
             res,
+            shop,
             isBot,
             404,
-            "Tohle není odkaz na produkt z Alzy",
-            "Odkaz na produkt na Alze končí na -d1234567.htm. V takovém odkazu změň alza.cz na fxalza.cz a Discord ukáže náhled.",
+            landingTexts(shop.lang).problems.notProductTitle,
+            landingTexts(shop.lang).problems.notProductBody(`alza.${shop.tld}`, siteHost(shop)),
           );
         }
       }
@@ -614,14 +634,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (u.searchParams.get("format") === "json") {
-      const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who);
+      const { data, stale, limited, missing } = await getProduct(shop, parsed.id, parsed.path, who);
       if (limited) {
         res.writeHead(429, { "content-type": "application/json; charset=utf-8", "retry-after": "60", "cache-control": "no-store", ...CORS_HEADERS });
         res.end(JSON.stringify({ error: "rate_limited", retryAfter: 60 }));
         return;
       }
       const body = JSON.stringify(
-        data ? { ...data, stale } : { id: parsed.id, error: "fetch_failed", canonicalUrl: `https://www.alza.cz${parsed.path}` },
+        data ? { ...data, shop: shop.code, stale } : { id: parsed.id, shop: shop.code, error: "fetch_failed", canonicalUrl: `https://${shop.host}${parsed.path}` },
         null,
         1,
       );
@@ -636,9 +656,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (!isBot) {
-      const known = getCached(parsed.id, true);
-      const target = outbound(known?.canonicalUrl ?? `https://www.alza.cz${parsed.path}`, carriedQuery(u.searchParams));
-      evt = { url: `/product/${parsed.id}`, name: "click", data: { product: parsed.id, ...(known ? { name: shortName(known.name, 80) } : {}), ...visitorData(req, who) } };
+      const known = getCached(keyOf(shop, parsed.id), true);
+      const target = outbound(known?.canonicalUrl ?? `https://${shop.host}${parsed.path}`, carriedQuery(u.searchParams));
+      evt = { url: `/product/${parsed.id}`, name: "click", data: { product: parsed.id, shop: shop.code, ...(known ? { name: shortName(known.name, 80) } : {}), ...visitorData(req, who) } };
       res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
       return;
@@ -646,13 +666,14 @@ const server = http.createServer(async (req, res) => {
 
     const trace: { cache?: string } = {};
     const bust = hasCacheBustSuffix(pathname);
-    const { data, stale, limited, missing } = await getProduct(parsed.id, parsed.path, who, bust, trace);
+    const { data, stale, limited, missing } = await getProduct(shop, parsed.id, parsed.path, who, bust, trace);
     const state = limited ? "limited" : !data ? (missing ? "missing" : "error") : data.partial ? "partial" : stale ? "stale" : "ok";
     evt = {
       url: `/product/${parsed.id}`,
       name: "embed",
       data: {
         platform: platformOf(ua),
+        shop: shop.code,
         product: parsed.id,
         ...(data ? { name: shortName(data.name, 80), ...(data.brand ? { brand: data.brand } : {}), benefits: data.benefits?.length ?? 0 } : {}),
         host: hostOf(req),
@@ -664,14 +685,14 @@ const server = http.createServer(async (req, res) => {
       },
     };
     if (limited) {
-      sendProblem(req, res, isBot, 429, "Moc požadavků najednou", "Náhled se teď načítá pro hodně odkazů. Zkus to prosím za chvíli.", { "retry-after": "60" }, false);
+      sendProblem(req, res, shop, isBot, 429, landingTexts(shop.lang).problems.rateTitle, landingTexts(shop.lang).problems.rateBody, { "retry-after": "60" }, false);
       return;
     }
     if (!data && !missing) {
-      sendProblem(req, res, isBot, 503, "Náhled se nepodařilo načíst", "Alza teď neodpovídá nebo je moc požadavků. Zkus to prosím za chvíli.", { "retry-after": "30" }, false);
+      sendProblem(req, res, shop, isBot, 503, landingTexts(shop.lang).problems.loadTitle, landingTexts(shop.lang).problems.loadBody, { "retry-after": "30" }, false);
       return;
     }
-    const html = embedHtml(data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram);
+    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram);
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
@@ -690,10 +711,10 @@ const server = http.createServer(async (req, res) => {
       fallback = null;
     }
     if (!res.headersSent && !isBot && fallback) {
-      res.writeHead(302, { Location: outbound(`https://www.alza.cz${fallback.path}`, fallbackQuery), "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+      res.writeHead(302, { Location: outbound(`https://${shop.host}${fallback.path}`, fallbackQuery), "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
     } else if (!res.headersSent) {
-      sendProblem(req, res, isBot, 503, "Něco se pokazilo", "Náhled se teď nepodařilo vytvořit. Zkus to prosím za chvíli.", { "retry-after": "30" }, false);
+      sendProblem(req, res, shop, isBot, 503, landingTexts(shop.lang).problems.wrongTitle, landingTexts(shop.lang).problems.wrongBody, { "retry-after": "30" }, false);
     } else {
       res.end();
     }
@@ -733,7 +754,7 @@ async function warmUp(): Promise<void> {
   for (const id of WARMUP_IDS) {
     const started = Date.now();
     try {
-      await refresh(id, `/-d${id}.htm`);
+      await refresh(CZ, id, `/-d${id}.htm`);
       console.log(`[warmup] ${id} ok in ${Date.now() - started}ms`);
     } catch (e) {
       console.log(`[warmup] ${id} failed after ${Date.now() - started}ms: ${e instanceof Error ? e.message : e}`);
