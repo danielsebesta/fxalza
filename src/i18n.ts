@@ -31,6 +31,8 @@ export interface Texts {
 const cs: Texts = {
   availability: {
     InStock: "Skladem",
+    OnTheWay: "Na cestě",
+    Expected: "Očekáváme",
     OutOfStock: "Není skladem",
     PreOrder: "Předprodej",
     PreSale: "Předprodej",
@@ -69,6 +71,8 @@ const cs: Texts = {
 const sk: Texts = {
   availability: {
     InStock: "Skladom",
+    OnTheWay: "Na ceste",
+    Expected: "Očakávame",
     OutOfStock: "Nie je skladom",
     PreOrder: "Predpredaj",
     PreSale: "Predpredaj",
@@ -107,6 +111,8 @@ const sk: Texts = {
 const hu: Texts = {
   availability: {
     InStock: "Raktáron",
+    OnTheWay: "Úton",
+    Expected: "Várható",
     OutOfStock: "Nincs raktáron",
     PreOrder: "Előrendelés",
     PreSale: "Előértékesítés",
@@ -145,6 +151,8 @@ const hu: Texts = {
 const de: Texts = {
   availability: {
     InStock: "Auf Lager",
+    OnTheWay: "Unterwegs",
+    Expected: "Erwartet",
     OutOfStock: "Nicht auf Lager",
     PreOrder: "Vorbestellung",
     PreSale: "Vorverkauf",

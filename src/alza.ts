@@ -373,6 +373,36 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ):
   return { entries: entries.slice(0, 8), complete: byTier.size === tiersFor(shop).length };
 }
 
+// Schema.org reports an incoming shipment as InStock, because it can already be ordered. The stock label is what the page shows.
+// A quantity ("Na cestě > 5 ks") or a date ("Očekáváme 29. října 2026", "Erwartet: 29. Oktober 2026") rides on that label. Neither is part of the status.
+const STOCK_STATUS: Record<Shop["lang"], [RegExp, string][]> = {
+  cs: [
+    [/očekáváme/i, "Expected"],
+    [/na cestě/i, "OnTheWay"],
+  ],
+  sk: [
+    [/očakávame/i, "Expected"],
+    [/na ceste/i, "OnTheWay"],
+  ],
+  hu: [
+    [/várható/i, "Expected"],
+    [/úton/i, "OnTheWay"],
+  ],
+  de: [
+    [/erwartet/i, "Expected"],
+    [/unterwegs/i, "OnTheWay"],
+  ],
+};
+
+export function availabilityKey(schemaAvailability: unknown, html: string, shop: Shop = CZ): string {
+  const schema = schemaAvailability ? String(schemaAvailability).split("/").pop()! : "unknown";
+  for (const m of html.matchAll(/class="stcStock[^"]*"[^>]*title="([^"]*)"/gi)) {
+    const title = decodeEntities(m[1]!);
+    for (const [re, key] of STOCK_STATUS[shop.lang]) if (re.test(title)) return key;
+  }
+  return schema;
+}
+
 // JSON-LD itemCondition says whether it is second hand, the grade is only in the stock label.
 // The Czech page names the grade in Czech; the other shops are only told apart as used.
 export function conditionText(itemCondition: unknown, html: string, shop: Shop = CZ): string | null {
@@ -473,7 +503,8 @@ const KOD_PARALLEL = 4;
 
 // /kod/<one code> redirects to that product's page, so a listing can also be put together from one request per code.
 async function fetchKodItem(code: string): Promise<KodItem | null> {
-  const p = extractProductJsonLd(await getHtml(CZ, `/kod/${code}`));
+  const html = await getHtml(CZ, `/kod/${code}`);
+  const p = extractProductJsonLd(html);
   if (!p) return null;
   const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
   const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
@@ -492,7 +523,7 @@ async function fetchKodItem(code: string): Promise<KodItem | null> {
     price,
     priceText: price === null ? null : formatMoney(CZ, price),
     wasText: null,
-    availability: offers?.availability ? (texts(CZ.lang).availability[String(offers.availability).split("/").pop()!] ?? null) : null,
+    availability: texts(CZ.lang).availability[availabilityKey(offers?.availability, html, CZ)] ?? null,
     image: image ? image.split("?")[0]! : null,
   };
 }
@@ -617,7 +648,7 @@ export async function fetchProduct(
   }
 
   const condition = conditionText(offers?.itemCondition, html, shop);
-  const availability = offers?.availability ? String(offers.availability).split("/").pop()! : "unknown";
+  const availability = availabilityKey(offers?.availability, html, shop);
 
   const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
   const canonicalUrl = (claimed && httpsUrlOn(claimed, `alza.${shop.tld}`)) || `https://${shop.host}${path}`;

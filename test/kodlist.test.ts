@@ -28,6 +28,13 @@ test("returns null when the page has no products", () => {
   assert.equal(parseKodList("<html><body>nic</body></html>", 1), null);
 });
 
+test("a listing keeps the stock word and drops the quantity and the date", () => {
+  const row = (id: string, stock: string) =>
+    `<div class="box-row"><a class="name js-box-link" href="/x-d${id}.htm">${id}</a><span class="avlVal">${stock}</span></div>`;
+  const list = parseKodList(row("1", "Skladem &gt; 5 ks") + row("2", "Na cestě &gt; 5 ks<div class='postfix'>Očekáváme 26.10.2026</div>") + row("3", "Očekáváme 29. října 2026") + row("4", "Není skladem"), 4)!;
+  assert.deepEqual(list.items.map((i) => i.availability), ["Skladem", "Na cestě", "Očekáváme", "Není skladem"]);
+});
+
 test("parses the raw page, where products are linked relatively", () => {
   const raw = readFileSync(new URL("./fixtures/kod-list-raw.html", import.meta.url), "utf8");
   const list = parseKodList(raw, 8)!;
@@ -36,5 +43,6 @@ test("parses the raw page, where products are linked relatively", () => {
   assert.equal(list.items[0]!.priceText, "4 890 Kč");
   assert.equal(list.items[2]!.wasText, "3 279 Kč");
   assert.equal(list.total, 45576);
+  assert.ok(list.items.every((i) => i.availability === "Skladem"));
   assert.ok(list.items.every((i) => i.image?.startsWith("https://image.alza.cz/products/")));
 });

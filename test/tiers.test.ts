@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { buildBenefits, conditionText, followerTiers, type TierResult } from "../src/alza.ts";
+import { availabilityKey, buildBenefits, conditionText, followerTiers, type TierResult } from "../src/alza.ts";
+import { texts } from "../src/i18n.ts";
+import { SHOPS } from "../src/shops.ts";
 
 interface Fixture {
   id: string;
@@ -71,6 +73,38 @@ test("a hidden Gold tier means Silver and Bronze are not requested", () => {
   const f = fixtures.find((x) => x.tiers.Gold?.hidden)!;
   const firstRound = new Map([...present(f)].filter(([name]) => name !== "Silver" && name !== "Bronze"));
   assert.deepEqual(followerTiers(firstRound), []);
+});
+
+test("an incoming shipment stays on the way when schema.org calls it in stock", () => {
+  const label = (t: string) => `<span class="stcStock avlVal avl1 none" title="${t}">${t}</span>`;
+  const schema = "https://schema.org/InStock";
+  assert.equal(availabilityKey(schema, label("Na cestě > 5 ks"), SHOPS.cz), "OnTheWay");
+  assert.equal(availabilityKey(schema, label("Na ceste > 5 ks"), SHOPS.sk), "OnTheWay");
+  assert.equal(availabilityKey(schema, label("Úton > 5 db"), SHOPS.hu), "OnTheWay");
+  assert.equal(availabilityKey(schema, label("Unterwegs > 5 Stk."), SHOPS.de), "OnTheWay");
+  assert.equal(availabilityKey(schema, label("Unterwegs > 5 Stk."), SHOPS.at), "OnTheWay");
+  assert.equal(availabilityKey(schema, label("Skladem > 5 ks"), SHOPS.cz), "InStock");
+  assert.equal(availabilityKey(schema, label("Na cestě > 5 ks"), SHOPS.sk), "InStock");
+  assert.equal(availabilityKey("https://schema.org/OutOfStock", "<html></html>", SHOPS.cz), "OutOfStock");
+  assert.equal(availabilityKey(undefined, "<html></html>"), "unknown");
+});
+
+test("an expected date and a piece count are not part of the status", () => {
+  const label = (t: string) => `<span class="stcStock avlVal avl4 none" title="${t}">${t}</span>`;
+  const schema = "https://schema.org/PreOrder";
+  assert.equal(availabilityKey(schema, label("Očekáváme 29. října 2026"), SHOPS.cz), "Expected");
+  assert.equal(availabilityKey(schema, label("Očekáváme 26.10.2026"), SHOPS.cz), "Expected");
+  assert.equal(availabilityKey("https://schema.org/InStock", label("Očekáváme 29. října 2026"), SHOPS.cz), "Expected");
+  assert.equal(availabilityKey(schema, label("Očakávame 29. októbra 2026"), SHOPS.sk), "Expected");
+  assert.equal(availabilityKey(schema, label("Várható időpont: október 29, 2026"), SHOPS.hu), "Expected");
+  assert.equal(availabilityKey(schema, label("Erwartet: 29. Oktober 2026"), SHOPS.de), "Expected");
+  assert.equal(availabilityKey(schema, label("Erwartet: 29. Oktober 2026"), SHOPS.at), "Expected");
+  assert.equal(availabilityKey(schema, label("Očekáváme 29. října 2026"), SHOPS.sk), "PreOrder");
+  assert.equal(availabilityKey(schema, label("Očakávame 29. októbra 2026"), SHOPS.cz), "PreOrder");
+  assert.equal(texts("cs").availability.Expected, "Očekáváme");
+  assert.equal(texts("sk").availability.Expected, "Očakávame");
+  assert.equal(texts("hu").availability.Expected, "Várható");
+  assert.equal(texts("de").availability.Expected, "Erwartet");
 });
 
 test("second hand condition comes from JSON-LD and the grade from the stock label", () => {
