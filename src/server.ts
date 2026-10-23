@@ -236,10 +236,9 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
   const line = (i: (typeof list.items)[number], rich: boolean): string => {
     const price = i.priceText ? (rich ? ` **${i.priceText}**` : ` ${i.priceText}`) : "";
     const was = i.wasText ? (rich ? ` ~~${i.wasText}~~` : ` (bylo ${i.wasText})`) : "";
-    if (!rich) return `${shortName(i.name, 60)} –${price}${was}`;
-    const history = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(i.url)}`;
-    const icon = customEmoji ? emojiMd("hlidac_shopu", "📈") : "📈";
-    return `[${mdEsc(shortName(i.name, 60))}](${outbound(i.url, carried)}) —${price}${was} ${icon} [Hlídač shopů](${history})`;
+    const name = shortName(i.name, 60);
+    if (!rich) return `${name} –${price}${was}`;
+    return `[${mdEsc(name)}](${outbound(i.url, carried)}) —${price}${was}`;
   };
   const img = list.items.find((i) => i.image)?.image ?? null;
   const imgUrl = img ? `${img}?width=${IMG_W}&height=${IMG_W}` : null;
