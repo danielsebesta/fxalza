@@ -115,6 +115,40 @@ test("ISIC gets its own cashback price when the API hands it the one of Basic", 
   assert.equal(buildBenefits(plain).entries.find((e) => e.kind === "tier")!.price, 950);
 });
 
+test("an ISIC discount of its own still takes cashback and a trade-in, and not a coupon", () => {
+  const promo = (amount: number, priceType: number, coupon = ""): PriceCandidate => ({
+    amount,
+    promo: true,
+    priceType,
+    name: coupon ? "Koupit s kódem" : priceType === 2 ? "S výkupním bonusem" : "Cena s Cashback",
+    coupon,
+  });
+  const row = (name: string, main: number, promos: PriceCandidate[]): TierResult => {
+    const list = price(main);
+    const selected = promos.reduce((best, next) => (next.amount < best.amount ? next : best), list);
+    return { tier: name, hidden: false, main: list, selected, promos };
+  };
+  const isic = (tiers: [string, TierResult][]) => {
+    const entry = buildBenefits(new Map(tiers)).entries.find((e) => e.label.includes("ISIC"))!;
+    return [entry.price, entry.note ?? null];
+  };
+  // 800 is already below the copied cashback of 900, and the 100 Basic gets still comes off
+  assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(900, 1)])], ["ISIC", row("ISIC", 800, [promo(900, 1)])]]), [700, "cashback"]);
+  // a copied trade-in bonus is the same kind of amount
+  assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(700, 2)])], ["ISIC", row("ISIC", 950, [promo(700, 2)])]]), [650, "výkup"]);
+  // a trade-in Alza already priced for ISIC stays as it came
+  assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(700, 2)])], ["ISIC", row("ISIC", 950, [promo(650, 2)])]]), [650, "výkup"]);
+  // the coupon would be the cheapest figure and is left off; the copied cashback is worked out
+  assert.deepEqual(
+    isic([
+      ["Basic", row("Basic", 1000, [promo(800, 3, "ALZADNY20"), promo(900, 1)])],
+      ["ISIC", row("ISIC", 950, [promo(760, 3, "ALZADNY20"), promo(900, 1)])],
+    ]),
+    [850, "cashback"],
+  );
+  assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(800, 3, "ALZADNY20")])], ["ISIC", row("ISIC", 950, [promo(760, 3, "ALZADNY20")])]]), [950, null]);
+});
+
 const price = (amount: number): PriceCandidate => ({ amount, promo: false, priceType: null, name: "", coupon: "" });
 const tier = (name: string, amount: number): TierResult => ({ tier: name, hidden: false, selected: price(amount), main: price(amount), promos: [] });
 

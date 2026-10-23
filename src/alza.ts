@@ -230,19 +230,48 @@ async function fetchBenefits(shop: Shop, id: string): Promise<BenefitsResult> {
   return { ...early, later: all.then(() => done(byTier)) };
 }
 
-// Alza's API gives ISIC the very same cashback price as Basic, so the ISIC discount is lost. When ISIC has a list price of its own and both
-// carry a cashback of the same amount, the price is worked out like for the other tiers: the ISIC price minus the cashback Basic gets.
-// The Alza-Benefit-Prices extension does the same.
-function isicCashback(isic: TierResult, basic: TierResult | undefined, shop: Shop): PriceCandidate | null {
-  const mine = isic.selected;
-  const theirs = basic?.selected;
-  if (!mine || !theirs || !isic.main || !basic?.main) return null;
-  if (!(mine.promo && mine.priceType === 1 && theirs.promo && theirs.priceType === 1 && mine.amount === theirs.amount)) return null;
-  if (!(isic.main.amount > 0 && basic.main.amount > 0 && isic.main.amount < basic.main.amount)) return null;
-  const cashback = basic.main.amount - theirs.amount;
-  const raw = isic.main.amount - cashback;
-  if (!(cashback > 0 && raw > 0)) return null;
-  return { amount: shop.currency === "EUR" ? Math.round(raw * 100) / 100 : Math.round(raw), promo: true, priceType: 1, name: mine.name, coupon: "" };
+function moneyRound(amount: number, shop: Shop): number {
+  return shop.currency === "EUR" ? Math.round(amount * 100) / 100 : Math.round(amount);
+}
+
+function cheapestPromo(promos: PriceCandidate[], kind: number): PriceCandidate | undefined {
+  let best: PriceCandidate | undefined;
+  for (const promo of promos) {
+    if (promo.coupon || promo.priceType !== kind) continue;
+    if (!best || promo.amount < best.amount) best = promo;
+  }
+  return best;
+}
+
+// A coupon does not combine with an ISIC price of its own. Cashback and a trade-in bonus do: each is the
+// amount Basic gets off its price, taken off the ISIC price. Alza often sends Basic's promo price for ISIC
+// too, and that price is then no help once the ISIC discount is already lower. A promo price that differs
+// from Basic's is ISIC's own and is kept. The Alza-Benefit-Prices extension works the cashback out the same way.
+function isicPrice(isic: TierResult, basic: TierResult | undefined, shop: Shop): PriceCandidate | null {
+  const list = isic.main;
+  const basicList = basic?.main;
+  if (!list || !basicList || !(list.amount > 0 && basicList.amount > 0 && list.amount < basicList.amount)) return null;
+
+  const bonus = (kind: number): PriceCandidate | null => {
+    const theirs = basic ? cheapestPromo(basic.promos, kind) : undefined;
+    const mine = cheapestPromo(isic.promos, kind);
+    if (mine && (!theirs || Math.abs(mine.amount - theirs.amount) >= 0.005)) {
+      return mine.amount < list.amount - 0.004 ? mine : null;
+    }
+    if (!theirs) return null;
+    const saved = basicList.amount - theirs.amount;
+    const raw = list.amount - saved;
+    if (!(saved > 0 && raw > 0 && raw < list.amount - 0.004)) return null;
+    return { amount: moneyRound(raw, shop), promo: true, priceType: kind, name: (mine ?? theirs).name, coupon: "" };
+  };
+
+  let best: PriceCandidate | null = null;
+  for (const kind of [1, 2]) {
+    const next = bonus(kind);
+    if (next && (!best || next.amount < best.amount)) best = next;
+  }
+  if (isic.selected?.coupon) return best ?? { ...list, promo: false, coupon: "" };
+  return best;
 }
 
 export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ): BenefitsResult {
@@ -317,7 +346,7 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ):
     const t = byTier.get(name);
     if (!t || t.hidden || !t.main || !t.selected) continue;
     if (!(base && t.main.amount < base - 0.004)) continue;
-    const selected = (name === "ISIC" ? isicCashback(t, basic, shop) : null) ?? t.selected;
+    const selected = (name === "ISIC" ? isicPrice(t, basic, shop) : null) ?? t.selected;
     const lowered = selected.amount < t.main.amount - 0.004;
     rows.push({
       names: [name],
