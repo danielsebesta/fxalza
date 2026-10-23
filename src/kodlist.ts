@@ -47,6 +47,11 @@ function czk(raw: string): { value: number; text: string } | null {
   return { value, text: `${new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 2 }).format(value).replace(/ /g, " ")} Kč` };
 }
 
+// Order codes are letters and digits. Some also contain "_" or "-" (APW_AWAY_84_42). Several codes are joined with ";".
+export function isKodPath(pathname: string): boolean {
+  return /^\/kod\/[A-Za-z0-9_;-]{1,400}$/.test(pathname);
+}
+
 export function kodCodes(pathname: string): string[] {
   return (pathname.replace(/^\/kod\//i, "").split(";").map((c) => c.trim()).filter(Boolean));
 }

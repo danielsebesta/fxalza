@@ -3,7 +3,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { fetchKodList, fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
 import { platformOf, track, type TrackEvent } from "./analytics.ts";
-import { kodCodes, type KodList } from "./kodlist.ts";
+import { isKodPath, kodCodes, type KodList } from "./kodlist.ts";
 import { hasCacheBustSuffix, isExtensionHost, parseProductPath, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
 import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
@@ -198,7 +198,6 @@ async function resolveSlug(shop: Shop, pathname: string, who: Requester): Promis
   return p;
 }
 
-const KOD_RE = /^\/kod\/[A-Za-z0-9;]{1,400}$/;
 const KOD_TTL_MS = 10 * 60_000;
 const KOD_MISS_TTL_MS = 2 * 60_000;
 const kodLists = new Map<string, { until: number; list: KodList | null }>();
@@ -727,7 +726,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
     let parsed = parseProductPath(pathname, u.searchParams.get("dq"));
-    if (!parsed && shop.code === "cz" && KOD_RE.test(pathname)) {
+    if (!parsed && shop.code === "cz" && isKodPath(pathname)) {
       const carried = carriedQuery(u.searchParams);
       if (!isBot) {
         evt = { url: "/kod", name: "click", data: { kind: "kod_list", ...visitorData(req, who) } };

@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { kodCodes, parseKodList } from "../src/kodlist.ts";
+import { isKodPath, kodCodes, parseKodList } from "../src/kodlist.ts";
 
 const html = readFileSync(new URL("./fixtures/kod-list.html", import.meta.url), "utf8");
 
 test("reads the order codes from the path", () => {
   assert.deepEqual(kodCodes("/kod/BD740h22b;EFr55s1;GSKILL0041"), ["BD740h22b", "EFr55s1", "GSKILL0041"]);
   assert.deepEqual(kodCodes("/kod/ABC"), ["ABC"]);
+  const withUnderscore = "/kod/SAMO0296b2;TEFHF6094;SIEAK86;APW_AWAY_84_42;KRMK1454;CHPto0214";
+  assert.equal(isKodPath(withUnderscore), true);
+  assert.deepEqual(kodCodes(withUnderscore), ["SAMO0296b2", "TEFHF6094", "SIEAK86", "APW_AWAY_84_42", "KRMK1454", "CHPto0214"]);
+  assert.equal(isKodPath("/kod/BD750m5b;ASr97c1"), true);
+  assert.equal(isKodPath("/kod/a-b"), true);
+  assert.equal(isKodPath("/kod/a.b"), false);
+  assert.equal(isKodPath("/kod/a/b"), false);
 });
 
 test("parses the products of a listing", () => {
