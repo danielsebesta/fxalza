@@ -6,13 +6,14 @@ import { platformOf, track, type TrackEvent } from "./analytics.ts";
 import { isKodPath, kodCodes, type KodList } from "./kodlist.ts";
 import { hasCacheBustSuffix, isExtensionHost, parseProductPath, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
-import { flushCache, getCached, peekCached, putCached } from "./cache.ts";
+import { sidecarStats } from "./fetcher.ts";
+import { cacheSize, flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { texts } from "./i18n.ts";
 import { ALL_SHOPS, CZ, SITE_APEX, shopByTld, shopOfHost, siteHost, siteUrl, type Shop } from "./shops.ts";
 import { DEMO_CSP, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, demoHtml, landingCsp, landingHtml, problemHtml, robotsTxt, sitemapXml } from "./landing.ts";
 import { landingTexts } from "./landing-i18n.ts";
-import { allowFetch, anonymizedIp, identify, rateTier, type Requester } from "./ratelimit.ts";
+import { allowFetch, anonymizedIp, identify, rateTier, retryAfterSeconds, type Requester } from "./ratelimit.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -58,26 +59,51 @@ function unsupportedHtml(shop: Shop, tld: string, target: string): string {
 }
 
 const EMBED_DEADLINE_MS = Number(process.env.EMBED_DEADLINE_MS ?? 5000);
+// A listing or a bare slug has no cached copy to fall back on, so it may take longer than an embed, but not for ever: the lookup
+// goes on in the background and its result is kept for the next crawl.
+const PAGE_DEADLINE_MS = Number(process.env.PAGE_DEADLINE_MS ?? 12_000);
 const inflight = new Map<string, Promise<ProductData>>();
+
+// Resolves with `fallback` when `p` has not settled within `ms`; `p` itself keeps running and its outcome is left to its other listeners.
+function withDeadline<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    p,
+    new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 function refresh(shop: Shop, id: string, path: string): Promise<ProductData> {
   const key = keyOf(shop, id);
   let p = inflight.get(key);
   if (!p) {
-    p = fetchProduct(
-      id,
-      path,
-      (benefits, complete) => {
-        const current = getCached(key, true);
-        if (!current) return;
-        const { partial: _, ...rest } = current;
-        putCached(key, { ...rest, benefits, ...(complete ? {} : { partial: true as const }) });
-      },
-      shop,
-    )
+    // The price tiers can finish after the page and are then written into the cached product. That update is only right for
+    // the product this very fetch produced: one that arrives before the product is in the cache is held until it is, and one
+    // that arrives after a newer fetch replaced the entry is dropped, so it never overwrites fresher prices.
+    let produced: ProductData | null = null;
+    let held: { benefits: BenefitEntry[]; complete: boolean } | null = null;
+    const applyLate = (benefits: BenefitEntry[], complete: boolean): void => {
+      if (!produced) {
+        held = { benefits, complete };
+        return;
+      }
+      const current = getCached(key, true);
+      if (!current || current.fetchedAt !== produced.fetchedAt) return;
+      const { partial: _, ...rest } = current;
+      putCached(key, { ...rest, benefits, ...(complete ? {} : { partial: true as const }) });
+    };
+    p = fetchProduct(id, path, applyLate, shop)
       .then((d) => {
         negative.delete(key);
         putCached(key, d);
+        produced = d;
+        if (held) {
+          const { benefits, complete } = held;
+          held = null;
+          applyLate(benefits, complete);
+        }
         return d;
       })
       .catch((e) => {
@@ -228,6 +254,7 @@ async function getKodList(pathname: string, who: Requester): Promise<KodList | n
 
 function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: boolean): string {
   const listUrl = outbound(`https://www.alza.cz${pathname}`, carried);
+  const openUrl = buttonUrl(listUrl, `https://www.alza.cz${pathname}`);
   const totalText = `${new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 }).format(list.total).replace(/\u00a0/g, " ")} Kč`;
   const count = list.items.length;
   const noun = count === 1 ? "položka" : count < 5 ? "položky" : "položek";
@@ -238,7 +265,7 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
     const was = i.wasText ? (rich ? ` ~~${i.wasText}~~` : ` (bylo ${i.wasText})`) : "";
     const name = shortName(i.name, 60);
     if (!rich) return `${name} –${price}${was}`;
-    return `[${mdEsc(name)}](${outbound(i.url, carried)}) —${price}${was}`;
+    return `[${mdEsc(name)}](${mdUrl(outbound(i.url, carried))}) —${price}${was}`;
   };
   const img = list.items.find((i) => i.image)?.image ?? null;
   const imgUrl = img ? `${img}?width=${IMG_W}&height=${IMG_W}` : null;
@@ -273,7 +300,7 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
           {
             type: 2,
             style: 5,
-            url: listUrl,
+            url: openUrl,
             label: "Otevřít na Alze",
             ...(customEmoji && emojiRef("alza_logo") ? { emoji: emojiRef("alza_logo") } : {}),
           },
@@ -374,6 +401,18 @@ function mdEsc(s: string): string {
   return s.replace(/([\\*_[\]~`|])/g, "\\$1");
 }
 
+// An address inside a markdown link: a parenthesis in the path (the URL parser leaves them as they are) would end the link early.
+function mdUrl(url: string): string {
+  return url.replace(/\(/g, "%28").replace(/\)/g, "%29");
+}
+
+// Discord takes a button address of 512 characters at most; past that the carried query is dropped rather than the whole embed.
+const BUTTON_URL_MAX = 512;
+
+function buttonUrl(url: string, plain: string): string {
+  return url.length <= BUTTON_URL_MAX ? url : withUtm(plain);
+}
+
 function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
   const shownPercent = e.percentShown ?? (e.percent === null ? null : Math.round(e.percent));
   const pct = shownPercent !== null && shownPercent > 0 ? ` (−${shownPercent} %)` : "";
@@ -382,7 +421,9 @@ function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
   if (!rich) return `${benefitEmoji(e, custom)} ${name} ${was}${e.priceText}${pct}`;
   // entries cached before the code was kept next to the label have it as the last word
   const code = e.kind === "coupon" ? (e.coupon ?? name.split(" ").pop()) : undefined;
-  const label = code ? name.replace(code, `\`${code}\``) : name;
+  // the label repeats what Alza calls the promotion, so it is escaped for markdown; the code is set verbatim between its backticks
+  const safeName = mdEsc(name);
+  const label = code ? safeName.replace(mdEsc(code), `\`${code.replace(/`/g, "'")}\``) : safeName;
   return `${benefitEmoji(e, custom)} ${label} ${was}**${e.priceText}**${pct}`;
 }
 
@@ -394,7 +435,7 @@ function stateText(p: ProductData): string {
 function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: string | null, carried: string, customEmoji: boolean): string | null {
   const t = texts(shop.lang);
   const titleUrl = carried ? outbound(canonical, carried) : canonical;
-  const titleLine = `### **[${mdEsc(p.name)}](${titleUrl})** (${stateText(p)})`;
+  const titleLine = `### **[${mdEsc(p.name)}](${mdUrl(titleUrl)})** (${stateText(p)})`;
   const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale");
   const priceLine =
     p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} ${t.price} **${p.priceText}**` : null;
@@ -404,6 +445,7 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
     ...(p.partial ? [`-# ${t.partial}`] : []),
   ];
   const humanUrl = outbound(canonical, carried);
+  const openUrl = buttonUrl(humanUrl, canonical);
   const historyUrl = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(canonical)}`;
 
   const desc = p.description ? mdEsc(p.description) : "";
@@ -432,7 +474,7 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
         {
           type: 2,
           style: 5,
-          url: humanUrl,
+          url: openUrl,
           label: t.open,
           ...(customEmoji && emojiRef("alza_logo") ? { emoji: emojiRef("alza_logo") } : {}),
         },
@@ -549,8 +591,27 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
 </html>`;
 }
 
+// Pages made for crawlers carry nothing that needs to run: no script, inline style only, images from Alza. A browser that does
+// land on one (the meta refresh takes it on to Alza) is told exactly that, so nothing an upstream page smuggled in could run here.
+const EMBED_CSP = [
+  "default-src 'none'",
+  `img-src ${ALL_SHOPS.flatMap((s) => [`https://alza.${s.tld}`, `https://*.alza.${s.tld}`]).join(" ")}`,
+  "style-src 'unsafe-inline'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
+const EMBED_PAGE_HEADERS: Record<string, string> = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "content-security-policy": EMBED_CSP,
+  "x-frame-options": "DENY",
+  vary: "Accept-Encoding, User-Agent",
+};
+
 const BASE_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
+  "strict-transport-security": "max-age=31536000",
   "referrer-policy": "strict-origin-when-cross-origin",
   "permissions-policy": "camera=(), microphone=(), geolocation=(), interest-cohort=()",
   "cross-origin-opener-policy": "same-origin",
@@ -615,8 +676,11 @@ for (const family of ["roboto"]) {
   }
 }
 
+// Only a plausible host name is kept. Anything else (a made-up header on a direct connection) counts as no host, so it is
+// neither matched against a shop nor passed on to the logs and the analytics.
 function hostOf(req: http.IncomingMessage): string {
-  return String(req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase().slice(0, 60);
+  const host = String(req.headers.host ?? "").replace(/:\d+$/, "").toLowerCase().slice(0, 60);
+  return /^[a-z0-9.-]+$/.test(host) ? host : "";
 }
 
 // Country comes from Cloudflare's header. The visitor id is a keyed hash of the address that changes whenever the server restarts; the address itself is never sent.
@@ -625,10 +689,13 @@ function visitorData(req: http.IncomingMessage, who: Requester): Record<string, 
   return { visitor: who.id, host: hostOf(req), ...(/^[A-Z]{2}$/.test(country) ? { country } : {}) };
 }
 
+let shuttingDown = false;
+
 const server = http.createServer(async (req, res) => {
   for (const [k, v] of Object.entries(BASE_HEADERS)) res.setHeader(k, v);
   const started = Date.now();
-  const ua = String(req.headers["user-agent"] ?? "");
+  // Control characters have no place in a user agent; they would break a log line (or a terminal) and the Umami request.
+  const ua = String(req.headers["user-agent"] ?? "").replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 512);
   const isBot = BOT_RE.test(ua);
   const who = identify(req, ua);
   if (who.unlisted) console.log(`[discord] Discordbot user agent from an address outside the published ranges (${who.id})`);
@@ -639,6 +706,12 @@ const server = http.createServer(async (req, res) => {
   let shop: Shop = hostShop ?? CZ;
 
   try {
+    // A request that reached us on an open connection while we are stopping is sent elsewhere; the proxy retries it on a live instance.
+    if (shuttingDown) {
+      res.writeHead(503, { "retry-after": "2", connection: "close", "cache-control": "no-store" });
+      res.end();
+      return;
+    }
     if (req.method === "OPTIONS") {
       res.writeHead(204, { ...CORS_HEADERS, allow: "GET, HEAD, OPTIONS" });
       res.end();
@@ -650,8 +723,23 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const u = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    // Only the path and query are read from the request target; the host comes from hostOf(), so a malformed Host header cannot break the parse.
+    let u: URL;
+    try {
+      u = new URL(req.url ?? "/", "http://localhost");
+    } catch {
+      res.writeHead(400, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end("Bad request\n");
+      return;
+    }
     logged = u.pathname;
+
+    if (u.pathname === "/healthz") {
+      const body = JSON.stringify({ ok: true, uptime: Math.round(process.uptime()), cache: cacheSize(), inflight: inflight.size, sidecar: sidecarStats() });
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex" });
+      res.end(req.method === "HEAD" ? undefined : body);
+      return;
+    }
 
     // The extension subdomains always land on the repository itself, whatever the path or query was.
     if (isExtensionHost(hostOf(req), APEX)) {
@@ -718,7 +806,7 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
           res.end();
         } else {
-          res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+          res.writeHead(200, EMBED_PAGE_HEADERS);
           res.end(req.method === "HEAD" ? undefined : unsupportedHtml(shop, tld, target));
         }
         return;
@@ -733,17 +821,17 @@ const server = http.createServer(async (req, res) => {
         res.end();
         return;
       }
-      const list = await getKodList(pathname, who);
+      const list = await withDeadline(getKodList(pathname, who), PAGE_DEADLINE_MS, null);
       evt = { url: "/kod", name: "embed", data: { kind: "kod_list", platform: platformOf(ua), items: list?.items.length ?? 0, requested: kodCodes(pathname).length, state: list ? "ok" : "error", tier: rateTier(who), host: hostOf(req) } };
       if (!list) {
         sendProblem(req, res, shop, isBot, 503, "Výpis se nepodařilo načíst", "Alza teď neodpovídá nebo je moc požadavků. Zkus to prosím za chvíli.", { "retry-after": "30" }, false);
         return;
       }
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+      res.writeHead(200, EMBED_PAGE_HEADERS);
       res.end(req.method === "HEAD" ? undefined : kodHtml(list, pathname, carried, !who.telegram));
       return;
     }
-    if (!parsed && isBot) parsed = await resolveSlug(shop, pathname, who);
+    if (!parsed && isBot) parsed = await withDeadline(resolveSlug(shop, pathname, who), PAGE_DEADLINE_MS, null);
     if (!parsed) {
       if (pathname === "/" && !alza) {
         if (!isBot) evt = { url: "/", data: visitorData(req, who) };
@@ -781,10 +869,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (u.searchParams.get("format") === "json") {
-      const { data, stale, limited, missing } = await getProduct(shop, parsed.id, parsed.path, who);
+      const { data, stale, limited, missing, timedOut } = await getProduct(shop, parsed.id, parsed.path, who);
       if (limited) {
-        res.writeHead(429, { "content-type": "application/json; charset=utf-8", "retry-after": "60", "cache-control": "no-store", ...CORS_HEADERS });
-        res.end(JSON.stringify({ error: "rate_limited", retryAfter: 60 }));
+        const wait = retryAfterSeconds(who.id, rateTier(who));
+        res.writeHead(429, { "content-type": "application/json; charset=utf-8", "retry-after": String(wait), "cache-control": "no-store", ...CORS_HEADERS });
+        res.end(JSON.stringify({ error: "rate_limited", retryAfter: wait }));
         return;
       }
       const body = JSON.stringify(
@@ -795,6 +884,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(data ? 200 : missing ? 404 : 503, {
         "content-type": "application/json; charset=utf-8",
         "cache-control": data ? "public, max-age=60, stale-while-revalidate=300" : "no-store",
+        // a fetch that ran out of time is probably finishing in the background, so a retry a few seconds later finds it cached
+        ...(data || missing ? {} : { "retry-after": timedOut ? "5" : "30" }),
         ...CORS_HEADERS,
         "access-control-expose-headers": "content-length",
       });
@@ -832,7 +923,7 @@ const server = http.createServer(async (req, res) => {
       },
     };
     if (limited) {
-      sendProblem(req, res, shop, isBot, 429, landingTexts(shop.lang).problems.rateTitle, landingTexts(shop.lang).problems.rateBody, { "retry-after": "60" }, false);
+      sendProblem(req, res, shop, isBot, 429, landingTexts(shop.lang).problems.rateTitle, landingTexts(shop.lang).problems.rateBody, { "retry-after": String(retryAfterSeconds(who.id, rateTier(who))) }, false);
       return;
     }
     if (!data && !missing && !timedOut) {
@@ -840,11 +931,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram, timedOut);
-    res.writeHead(200, {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      vary: "Accept-Encoding, User-Agent",
-    });
+    res.writeHead(200, EMBED_PAGE_HEADERS);
     res.end(req.method === "HEAD" ? undefined : html);
   } catch (e) {
     console.error("[server] error:", e);
@@ -917,20 +1004,45 @@ async function warmUp(): Promise<void> {
   }
 }
 
+server.on("error", (e: NodeJS.ErrnoException) => {
+  console.error(`[server] cannot listen on ${HOST}:${PORT}: ${e.code === "EADDRINUSE" ? "the port is taken" : e.message}`);
+  flushCache();
+  stopSidecar();
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
   console.log(`[server] fxalza listening on http://${HOST}:${PORT}`);
   void warmUp();
 });
 
-process.once("SIGINT", () => {
-  flushCache();
-  stopSidecar();
-  server.close();
-  process.exit(0);
-});
-process.once("SIGTERM", () => {
-  flushCache();
-  stopSidecar();
-  server.close();
-  process.exit(0);
-});
+// Stop taking requests, let the ones being answered finish (SHUTDOWN_GRACE_MS at most), then write the cache and leave.
+// Idle keep-alive connections are closed at once, the busy ones after their response; whatever is still open at the end is cut.
+const SHUTDOWN_GRACE_MS = Number(process.env.SHUTDOWN_GRACE_MS ?? 8000);
+
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} received, finishing open requests`);
+  let done = false;
+  const finish = (): void => {
+    if (done) return;
+    done = true;
+    flushCache();
+    stopSidecar();
+    process.exit(0);
+  };
+  const hard = setTimeout(() => {
+    console.warn(`[server] open requests did not finish within ${SHUTDOWN_GRACE_MS}ms, closing them`);
+    server.closeAllConnections();
+    finish();
+  }, SHUTDOWN_GRACE_MS);
+  server.close(() => {
+    clearTimeout(hard);
+    finish();
+  });
+  server.closeIdleConnections();
+}
+
+process.once("SIGINT", () => shutdown("SIGINT"));
+process.once("SIGTERM", () => shutdown("SIGTERM"));

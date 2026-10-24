@@ -1,4 +1,6 @@
 // Alza's "Výpis zboží" page (alza.cz/kod/<code>;<code>;...) lists several products by their order codes.
+import { decodeEntities, httpsUrlOn } from "./sanitize.ts";
+
 export interface KodItem {
   id: string;
   name: string;
@@ -16,29 +18,17 @@ export interface KodList {
   total: number;
 }
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-
 function text(raw: string): string {
-  return raw
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi, (m, dec?: string, hex?: string, name?: string) =>
-      dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16)) : (ENTITIES[name!.toLowerCase()] ?? m),
-    )
-    .replace(/\s+/g, " ")
-    .trim();
+  return decodeEntities(raw.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
 // The raw page links products relatively ("/amd-ryzen-5-9600x-d12482042.htm"), a browser's saved copy has them absolute.
 function alzaUrl(value: string | undefined, hostSuffix: string): string | null {
   if (!value) return null;
-  try {
-    const u = new URL(value.replace(/&amp;/g, "&"), `https://www.${hostSuffix}/`);
-    return u.protocol === "https:" && (u.hostname === hostSuffix || u.hostname.endsWith(`.${hostSuffix}`)) ? u.toString() : null;
-  } catch {
-    return null;
-  }
+  return httpsUrlOn(value.replace(/&amp;/g, "&"), hostSuffix, `https://www.${hostSuffix}/`);
 }
 
+// Alza and Intl both group the digits with a no-break space (U+00A0, written as an escape so that an editor cannot swap it for a plain one).
 function czk(raw: string): { value: number; text: string } | null {
   const m = /(\d[\d\s]*)(?:,(\d{1,2}))?/.exec(raw.replace(/ /g, " "));
   if (!m) return null;

@@ -1,5 +1,5 @@
 import { track } from "./analytics.ts";
-import { OverloadedError, Sidecar } from "./sidecar.ts";
+import { OverloadedError, Sidecar, type SidecarStats } from "./sidecar.ts";
 
 export interface FetchResult {
   status: number;
@@ -18,7 +18,8 @@ export interface FetchOpts {
 export interface Provider {
   name: string;
   enabled: () => boolean;
-  run: (url: string, opts: FetchOpts, timeoutMs: number) => Promise<{ status: number; body: string }>;
+  // signal fires when another provider already answered, so a hedged request that lost can let go of its connection
+  run: (url: string, opts: FetchOpts, timeoutMs: number, signal: AbortSignal) => Promise<{ status: number; body: string }>;
 }
 
 const COOLDOWN_MS = Number(process.env.FETCH_COOLDOWN_MS ?? 60_000);
@@ -38,6 +39,37 @@ function paidBudgetLeft(): boolean {
   return paidUsed < PAID_DAILY_MAX;
 }
 const sidecar = new Sidecar();
+
+export function sidecarStats(): SidecarStats {
+  return sidecar.stats();
+}
+
+const MAX_BODY_BYTES = Number(process.env.FETCH_MAX_BODY_BYTES ?? 8 * 1024 * 1024);
+
+// Reads a response body up to `max` bytes and fails beyond that, so an upstream answering with far more than a page cannot
+// fill the memory of the process; res.text() has no such limit. The sidecar applies the same cap on its side.
+export async function readBodyCapped(res: Response, max = MAX_BODY_BYTES): Promise<string> {
+  const declared = Number(res.headers.get("content-length"));
+  if (declared > max) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`response of ${declared} bytes is over the ${max} byte limit`);
+  }
+  if (!res.body) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      throw new Error(`response is over the ${max} byte limit`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 class KeyPool {
   private name: string;
@@ -64,10 +96,11 @@ class KeyPool {
     return null;
   }
 
-  async run(attempt: (key: string) => Promise<{ status: number; body: string }>): Promise<{ status: number; body: string }> {
+  async run(attempt: (key: string) => Promise<{ status: number; body: string }>, signal?: AbortSignal): Promise<{ status: number; body: string }> {
     const tried = new Set<string>();
     let last: { status: number; body: string } | null = null;
     for (let key = this.pick(tried); key; key = this.pick(tried)) {
+      if (signal?.aborted) throw signal.reason;
       tried.add(key);
       const n = this.keys.indexOf(key) + 1;
       try {
@@ -115,6 +148,11 @@ export function stopSidecar(): void {
   sidecar.stop();
 }
 
+// The request gives up at its own timeout or as soon as another provider has won, whichever comes first.
+function paidSignal(timeoutMs: number, signal: AbortSignal): AbortSignal {
+  return AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]);
+}
+
 const providers: Provider[] = [
   {
     name: "sidecar",
@@ -129,13 +167,14 @@ const providers: Provider[] = [
         res = again;
       }
       if (res.error) throw new Error(res.error);
+      if (res.truncated) throw new Error(`sidecar: response larger than the sidecar passes on (HTTP ${res.status})`);
       return { status: res.status, body: Buffer.from(res.body, "base64").toString("utf8") };
     },
   },
   {
     name: "brightdata",
     enabled: () => brightdata.available(),
-    run: (url, opts, timeoutMs) =>
+    run: (url, opts, timeoutMs, signal) =>
       brightdata.run(async (key) => {
         const res = await fetch("https://api.brightdata.com/request", {
           method: "POST",
@@ -146,36 +185,36 @@ const providers: Provider[] = [
             format: "raw",
             country: (opts.country ?? "CZ").toLowerCase(),
           }),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: paidSignal(timeoutMs, signal),
         });
-        return { status: res.status, body: await res.text() };
-      }),
+        return { status: res.status, body: await readBodyCapped(res) };
+      }, signal),
   },
   {
     name: "scrape.do",
     enabled: () => scrapedo.available(),
-    run: (url, opts, timeoutMs) =>
+    run: (url, opts, timeoutMs, signal) =>
       scrapedo.run(async (key) => {
         const api = `https://api.scrape.do/?token=${key}&url=${encodeURIComponent(url)}&super=true&geoCode=${(opts.country ?? "CZ").toLowerCase()}`;
-        const res = await fetch(api, { signal: AbortSignal.timeout(timeoutMs) });
-        return { status: res.status, body: await res.text() };
-      }),
+        const res = await fetch(api, { signal: paidSignal(timeoutMs, signal) });
+        return { status: res.status, body: await readBodyCapped(res) };
+      }, signal),
   },
   {
     name: "firecrawl",
     enabled: () => firecrawl.available(),
-    run: (url, opts, timeoutMs) =>
+    run: (url, opts, timeoutMs, signal) =>
       firecrawl.run(async (key) => {
         const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
           method: "POST",
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
           body: JSON.stringify({ url, formats: ["rawHtml"], location: { country: opts.country ?? "CZ" }, timeout: timeoutMs }),
-          signal: AbortSignal.timeout(timeoutMs + 5000),
+          signal: paidSignal(timeoutMs + 5000, signal),
         });
-        const j = (await res.json()) as { success?: boolean; data?: { rawHtml?: string; metadata?: { statusCode?: number } } };
+        const j = JSON.parse(await readBodyCapped(res)) as { success?: boolean; data?: { rawHtml?: string; metadata?: { statusCode?: number } } };
         if (!res.ok || !j.success) throw new KeyError(`firecrawl HTTP ${res.status}`, res.status);
         return { status: j.data?.metadata?.statusCode ?? 200, body: j.data?.rawHtml ?? "" };
-      }),
+      }, signal),
   },
 ];
 
@@ -200,7 +239,7 @@ function runnable(p: Provider): boolean {
   return p.enabled() && (downUntil.get(p.name) ?? 0) <= Date.now();
 }
 
-async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: number): Promise<Attempt> {
+async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: number, signal: AbortSignal): Promise<Attempt> {
   if (p.name !== "sidecar") {
     if (!paidBudgetLeft()) {
       track({ url: "/upstream", name: "paid_budget_exhausted", data: { provider: p.name } });
@@ -213,7 +252,7 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
   let status = 0;
   let outcome: Attempt;
   try {
-    const r = await p.run(url, opts, t);
+    const r = await p.run(url, opts, t, signal);
     status = r.status;
     if (usable(r.status, r.body)) {
       track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: true, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
@@ -224,6 +263,8 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
     outcome = { last: { ...r, via: p.name }, error: `${p.name}: HTTP ${r.status}` };
   } catch (e) {
     if (e instanceof OverloadedError) return { overloaded: e };
+    // another provider won the race and this request was told to stop: nothing is wrong with the provider
+    if (signal.aborted) return {};
     outcome = { error: `${p.name}: ${e instanceof Error ? e.message : e}` };
   }
   track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: false, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
@@ -238,6 +279,7 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
 
 // The sidecar goes first and alone. Paid providers follow in order, but when one has not answered after hedgeMs the next one
 // starts alongside it and the first usable answer wins, so one slow provider does not eat the whole deadline of an embed.
+// The ones still running when a winner is in are aborted, so a lost race does not keep a connection (and a paid request) open.
 export async function fetchWith(list: Provider[], url: string, opts: FetchOpts = {}, hedgeMs = HEDGE_MS): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? 25_000;
   const errors: string[] = [];
@@ -245,6 +287,7 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
   let winner: FetchResult | null = null;
   let overloaded: OverloadedError | null = null;
   const pending = new Set<Promise<void>>();
+  const running = new Map<Promise<void>, AbortController>();
 
   const order = list
     .map((p, i) => ({ p, rank: p.name === "sidecar" ? -2 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
@@ -254,15 +297,20 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
   for (const p of order) {
     if (winner || overloaded) break;
     if (!runnable(p)) continue;
-    const job: Promise<void> = attempt(p, url, opts, timeoutMs)
+    const controller = new AbortController();
+    const job: Promise<void> = attempt(p, url, opts, timeoutMs, controller.signal)
       .then((a) => {
         if (a.result && !winner) winner = a.result;
         if (a.last) last = a.last;
         if (a.error) errors.push(a.error);
         if (a.overloaded) overloaded = a.overloaded;
       })
-      .finally(() => pending.delete(job));
+      .finally(() => {
+        pending.delete(job);
+        running.delete(job);
+      });
     pending.add(job);
+    running.set(job, controller);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stagger = p.name === "sidecar" ? new Promise<void>(() => {}) : new Promise<void>((resolve) => (timer = setTimeout(resolve, hedgeMs)));
     await Promise.race([job, stagger]);
@@ -270,7 +318,10 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
   }
   while (!winner && !overloaded && pending.size > 0) await Promise.race([...pending]);
 
-  if (winner) return winner;
+  if (winner) {
+    for (const controller of running.values()) controller.abort(new Error("another provider answered first"));
+    return winner;
+  }
   if (overloaded) throw overloaded;
   if (last) {
     const l: FetchResult = last;

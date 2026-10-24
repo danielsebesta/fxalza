@@ -43,7 +43,8 @@ export function parseSiteDomains(raw: string | undefined): SiteDomains {
   const out: SiteDomains = {};
   for (const pair of (raw ?? "").split(",")) {
     const [code, domain] = pair.split("=").map((s) => s.trim().toLowerCase());
-    if (code && domain && code in SHOPS && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) out[code as ShopCode] = domain;
+    // hasOwn, not `in`: "__proto__" and "constructor" are in every object
+    if (code && domain && Object.hasOwn(SHOPS, code) && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) out[code as ShopCode] = domain;
   }
   return out;
 }

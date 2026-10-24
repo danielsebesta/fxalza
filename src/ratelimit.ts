@@ -38,7 +38,7 @@ function buildRanges(cidrs: string[]): { list: BlockList; count: number } {
 
 let telegramRanges: BlockList = buildRanges(TELEGRAM_CIDRS).list;
 
-async function loadTelegramRanges(): Promise<void> {
+async function loadTelegramRanges(): Promise<boolean> {
   try {
     const res = await fetch(TELEGRAM_RANGES_URL, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -46,14 +46,16 @@ async function loadTelegramRanges(): Promise<void> {
     if (count === 0) throw new Error("no prefixes");
     telegramRanges = list;
     console.log(`[telegram] loaded ${count} address ranges`);
+    return true;
   } catch (e) {
     console.warn(`[telegram] address ranges not refreshed, keeping previous: ${e instanceof Error ? e.message : e}`);
+    return false;
   }
 }
 
 let discordRanges: BlockList | null = null;
 
-async function loadDiscordRanges(): Promise<void> {
+async function loadDiscordRanges(): Promise<boolean> {
   try {
     const res = await fetch(DISCORD_RANGES_URL, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -71,15 +73,34 @@ async function loadDiscordRanges(): Promise<void> {
     if (count === 0) throw new Error("no prefixes");
     discordRanges = list;
     console.log(`[discord] loaded ${count} address ranges`);
+    return true;
   } catch (e) {
     console.warn(`[discord] address ranges not loaded: ${e instanceof Error ? e.message : e}`);
+    return false;
   }
 }
 
-void loadDiscordRanges();
-setInterval(() => void loadDiscordRanges(), 6 * 3600_000).unref();
-void loadTelegramRanges();
-setInterval(() => void loadTelegramRanges(), 6 * 3600_000).unref();
+const RANGES_REFRESH_MS = 6 * 3600_000;
+const RANGES_RETRY_MS = 60_000;
+
+// Until Discord's list is in, any client with a Discordbot user agent gets the Discord tier, so a failed download is retried
+// soon (a minute, then doubling) instead of at the next regular refresh six hours later.
+function keepLoading(load: () => Promise<boolean>): void {
+  let failures = 0;
+  const tick = async (): Promise<void> => {
+    const ok = await load();
+    failures = ok ? 0 : failures + 1;
+    const delay = ok ? RANGES_REFRESH_MS : Math.min(RANGES_REFRESH_MS, RANGES_RETRY_MS * 2 ** Math.min(failures - 1, 10));
+    setTimeout(() => void tick(), delay).unref();
+  };
+  void tick();
+}
+
+// IP_RANGES_REFRESH=0 keeps the built-in lists (offline runs); Discord then has no list and the user agent alone counts.
+if (process.env.IP_RANGES_REFRESH !== "0") {
+  keepLoading(loadDiscordRanges);
+  keepLoading(loadTelegramRanges);
+}
 
 function listedAsDiscord(ip: string): boolean {
   return discordRanges !== null && isIP(ip) > 0 && discordRanges.check(ip, isIP(ip) === 4 ? "ipv4" : "ipv6");
@@ -115,13 +136,45 @@ function isPrivate(ip: string): boolean {
   );
 }
 
+// Only a connection from a proxy of ours may say who the visitor is (cf-connecting-ip, x-forwarded-for); from anyone else
+// those headers are just text. TRUSTED_PROXIES is a list of addresses or CIDRs ("127.0.0.1,::1,10.0.0.0/8"). Without it every
+// private address is trusted, which is right for a tunnel on the same machine and too wide on a shared network.
+export function buildTrustedProxies(raw: string | undefined): ((ip: string) => boolean) | null {
+  const entries = (raw ?? "").split(/[\s,;]+/).filter(Boolean);
+  if (entries.length === 0) return null;
+  const list = new BlockList();
+  for (const entry of entries) {
+    const [address, bits] = entry.split("/");
+    const kind = isIP(address ?? "");
+    if (!address || !kind) {
+      console.warn(`[proxy] TRUSTED_PROXIES entry ignored: ${entry}`);
+      continue;
+    }
+    const family = kind === 4 ? "ipv4" : "ipv6";
+    if (bits === undefined) list.addAddress(address, family);
+    else list.addSubnet(address, Number(bits), family);
+  }
+  return (ip) => isIP(ip) > 0 && list.check(ip, isIP(ip) === 4 ? "ipv4" : "ipv6");
+}
+
+const trustedProxy = buildTrustedProxies(process.env.TRUSTED_PROXIES) ?? isPrivate;
+
 function rawClientIp(req: http.IncomingMessage): string {
   const peer = normalize(req.socket.remoteAddress);
-  if (!isPrivate(peer)) return peer;
+  if (!trustedProxy(peer)) return peer;
   const cf = req.headers["cf-connecting-ip"];
   if (typeof cf === "string" && isIP(cf.trim())) return normalize(cf.trim());
-  const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",")[0]!.trim();
+  // the proxy appends the address it saw, so the last entry is the one it vouches for; the first can be anything the client sent
+  const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",").pop()!.trim();
   return isIP(forwarded) ? normalize(forwarded) : peer;
+}
+
+function ipv6Groups(ip: string): string[] | null {
+  const [head = "", tail = ""] = ip.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...front, ...Array<string>(8 - front.length - back.length).fill("0"), ...back] : front;
+  return groups.length === 8 ? groups : null;
 }
 
 // Country-level geolocation survives zeroing the host part, and the full address never leaves the process.
@@ -129,11 +182,16 @@ export function anonymizeIp(ip: string): string | undefined {
   const kind = isIP(ip);
   if (kind === 4) return ip.replace(/\.\d+$/, ".0");
   if (kind !== 6) return undefined;
-  const [head = "", tail = ""] = ip.split("::");
-  const front = head ? head.split(":") : [];
-  const back = tail ? tail.split(":") : [];
-  const groups = ip.includes("::") ? [...front, ...Array<string>(8 - front.length - back.length).fill("0"), ...back] : front;
-  return groups.length === 8 ? `${groups.slice(0, 3).join(":")}::` : undefined;
+  const groups = ipv6Groups(ip);
+  return groups ? `${groups.slice(0, 3).join(":")}::` : undefined;
+}
+
+// What the limits are counted against. An IPv6 connection has a whole /64 (at least) to pick addresses from, so a limit per
+// address would be no limit at all there; the /64 is the client. IPv4 stays per address.
+export function clientKey(ip: string): string {
+  if (isIP(ip) !== 6) return ip;
+  const groups = ipv6Groups(ip);
+  return groups ? `${groups.slice(0, 4).join(":")}::/64` : ip;
 }
 
 export function anonymizedIp(req: http.IncomingMessage): string | undefined {
@@ -151,7 +209,7 @@ export interface Requester {
 
 export function identify(req: http.IncomingMessage, userAgent: string): Requester {
   const ip = rawClientIp(req);
-  const id = createHmac("sha256", SECRET).update(ip).digest("hex").slice(0, 16);
+  const id = createHmac("sha256", SECRET).update(clientKey(ip)).digest("hex").slice(0, 16);
   const listed = listedAsDiscord(ip);
   const claimsDiscord = DISCORD_UA.test(userAgent);
   const telegram = TELEGRAM_UA.test(userAgent);
@@ -167,6 +225,13 @@ export function rateTier(who: Requester): RateTier {
   return who.crawler ? "crawler" : "other";
 }
 
+function perClientWindow(tier: RateTier): { windowMs: number; max: number } {
+  return {
+    windowMs: tier === "other" ? 10 * 60_000 : 60_000,
+    max: tier === "discord" ? DISCORD_PER_MIN : tier === "crawler" ? CRAWLER_PER_MIN : OTHER_PER_10MIN,
+  };
+}
+
 export function allowFetch(id: string, tier: RateTier): boolean {
   const now = Date.now();
   globalHits = globalHits.filter((t) => now - t < 60_000);
@@ -176,8 +241,7 @@ export function allowFetch(id: string, tier: RateTier): boolean {
   crawlerGlobalHits = crawlerGlobalHits.filter((t) => now - t < 60_000);
   if (tier === "crawler" && crawlerGlobalHits.length >= CRAWLER_GLOBAL_PER_MIN) return false;
 
-  const windowMs = tier === "other" ? 10 * 60_000 : 60_000;
-  const max = tier === "discord" ? DISCORD_PER_MIN : tier === "crawler" ? CRAWLER_PER_MIN : OTHER_PER_10MIN;
+  const { windowMs, max } = perClientWindow(tier);
   const key = `${tier[0]}:${id}`;
   const list = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
   if (list.length >= max) {
@@ -192,4 +256,23 @@ export function allowFetch(id: string, tier: RateTier): boolean {
   if (tier === "crawler") crawlerGlobalHits.push(now);
   if (hits.size > STORE_MAX) hits.delete(hits.keys().next().value!);
   return true;
+}
+
+// Seconds until a refused client may get through again: when the oldest hit of every window that is full has left it.
+// A client in the "other" tier told to wait a minute would only be refused again, its window is ten minutes long.
+export function retryAfterSeconds(id: string, tier: RateTier): number {
+  const now = Date.now();
+  const until = (list: number[], windowMs: number, max: number): number => {
+    const live = list.filter((t) => now - t < windowMs);
+    if (live.length < max) return 0;
+    return live[live.length - max]! + windowMs - now;
+  };
+  const { windowMs, max } = perClientWindow(tier);
+  const waits = [
+    until(globalHits, 60_000, GLOBAL_PER_MIN),
+    tier === "other" ? until(otherGlobalHits, 60_000, OTHER_GLOBAL_PER_MIN) : 0,
+    tier === "crawler" ? until(crawlerGlobalHits, 60_000, CRAWLER_GLOBAL_PER_MIN) : 0,
+    until(hits.get(`${tier[0]}:${id}`) ?? [], windowMs, max),
+  ];
+  return Math.max(1, Math.ceil(Math.max(...waits) / 1000));
 }

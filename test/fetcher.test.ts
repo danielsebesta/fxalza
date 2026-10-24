@@ -53,6 +53,30 @@ test("a failing provider hands over straight away, without waiting for the hedge
   assert.ok(Date.now() - started < 500);
 });
 
+test("a hedged provider that loses is told to stop, and its abort is not held against it", async () => {
+  const aborted: string[] = [];
+  const slow: Provider = {
+    name: "paid-f1",
+    enabled: () => true,
+    run: (_url, _opts, _timeout, signal) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve({ status: 200, body: "<html>slow</html>" }), 300);
+        signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          aborted.push("paid-f1");
+          reject(signal.reason);
+        });
+      }),
+  };
+  const res = await fetchWith([provider("sidecar", 5, 403), slow, provider("paid-f2", 20, 200)], URL_, {}, 50);
+  assert.equal(res.via, "paid-f2");
+  await wait(20);
+  assert.deepEqual(aborted, ["paid-f1"]);
+  // the aborted provider is still runnable: it answers the next call on its own
+  const again = await fetchWith([slow], URL_, {}, 50).catch((e: Error) => e);
+  assert.ok(!(again instanceof Error), "an aborted loser must not be put on cooldown");
+});
+
 test("the last unusable answer is returned when nothing is usable, and an error when nothing answered", async () => {
   const none = await fetchWith([provider("sidecar", 5, 403), provider("paid-e1", 5, 403)], URL_, {}, 50);
   assert.equal(none.status, 403);

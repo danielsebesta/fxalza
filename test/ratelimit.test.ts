@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { allowFetch, anonymizeIp, identify, rateTier } from "../src/ratelimit.ts";
+import { allowFetch, anonymizeIp, identify, rateTier, retryAfterSeconds } from "../src/ratelimit.ts";
 
 function request(userAgent: string, ip = "127.0.0.1") {
   return {
@@ -34,6 +34,16 @@ test("known link-preview crawlers get the crawler tier, unknown clients stay in 
 test("crawler tier is capped globally", () => {
   const results = Array.from({ length: 12 }, (_, i) => allowFetch(`crawler-${i}`, "crawler"));
   assert.equal(results.filter(Boolean).length, 10);
+});
+
+test("a refused client is told to wait for its own window, ten minutes for the other tier", () => {
+  // RATE_OTHER_PER_10MIN defaults to 3 per client; the fourth attempt is refused
+  const results = Array.from({ length: 4 }, () => allowFetch("other-client", "other"));
+  assert.deepEqual(results, [true, true, true, false]);
+  const wait = retryAfterSeconds("other-client", "other");
+  assert.ok(wait > 500 && wait <= 600, `expected close to ten minutes, got ${wait}s`);
+  // a client that was never refused is not told to wait
+  assert.equal(retryAfterSeconds("fresh-client", "discord"), 1);
 });
 
 test("anonymizeIp zeroes the host part of both address families", () => {

@@ -6,6 +6,7 @@ import { fetchUrl } from "./fetcher.ts";
 import { texts } from "./i18n.ts";
 import { kodCodes, parseKodList, type KodItem, type KodList } from "./kodlist.ts";
 import { parseProductPath, type Parsed } from "./parse.ts";
+import { decodeEntities, httpsUrlOn } from "./sanitize.ts";
 import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 
 export { stopSidecar } from "./fetcher.ts";
@@ -453,14 +454,9 @@ export class UpstreamError extends Error {
   }
 }
 
-function httpsUrlOn(value: string, domain: string): string | null {
-  try {
-    const u = new URL(value);
-    const host = u.hostname.toLowerCase();
-    return u.protocol === "https:" && (host === domain || host.endsWith(`.${domain}`)) ? u.toString() : null;
-  } catch {
-    return null;
-  }
+// The key comes from the page, so only the shop's own labels are looked up, never what every object has by birth ("constructor").
+function availabilityLabel(t: ReturnType<typeof texts>, key: string): string | null {
+  return Object.hasOwn(t.availability, key) ? t.availability[key]! : null;
 }
 
 async function getHtml(shop: Shop, path: string): Promise<string> {
@@ -552,7 +548,7 @@ async function fetchKodItem(code: string): Promise<KodItem | null> {
     price,
     priceText: price === null ? null : formatMoney(CZ, price),
     wasText: null,
-    availability: texts(CZ.lang).availability[availabilityKey(offers?.availability, html, CZ)] ?? null,
+    availability: availabilityLabel(texts(CZ.lang), availabilityKey(offers?.availability, html, CZ)),
     image: image ? image.split("?")[0]! : null,
   };
 }
@@ -607,14 +603,6 @@ export function slugTitle(path: string): string {
     .join(" ");
   s = s.replace(/\b(\d+)\s*(gb|tb|mb|kb|kg|mm|cm|hz|w)\b/gi, (_all, n: string, u: string) => `${n} ${u.toUpperCase()}`);
   return s;
-}
-
-const HTML_ENTITIES: Record<string, string> = { quot: '"', amp: "&", lt: "<", gt: ">", apos: "'", nbsp: " " };
-
-function decodeEntities(t: string): string {
-  return t.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi, (m, dec?: string, hex?: string, name?: string) =>
-    dec ? String.fromCodePoint(Number(dec)) : hex ? String.fromCodePoint(parseInt(hex, 16)) : (HTML_ENTITIES[name!.toLowerCase()] ?? m),
-  );
 }
 
 function cleanDescription(raw: unknown): string | undefined {
@@ -693,25 +681,38 @@ export async function fetchProduct(
     }),
   ]);
   clearTimeout(grace);
+  // The late deliveries run after this function has returned, so a failure in them has nothing to propagate to and is logged here.
+  const deliver = (b: BenefitsResult): void => {
+    try {
+      onLateBenefits?.(b.entries, b.complete);
+    } catch (e) {
+      console.error(`[benefits] ${id} late update not applied: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+  const lateFailed = (e: unknown): void => console.error(`[benefits] ${id} late tiers failed: ${e instanceof Error ? e.message : e}`);
   if (ready) {
     benefits = ready.b.entries;
     partial = !ready.b.complete;
     track({ url: "/benefits", name: "benefits", data: { outcome: "in_time", ms: Date.now() - benefitsStarted, entries: ready.b.entries.length, complete: ready.b.complete } });
-    void ready.b.later?.then((l) => {
-      console.log(`[benefits] ${id} completed late (${l.entries.length})`);
-      onLateBenefits?.(l.entries, l.complete);
-    });
+    ready.b.later
+      ?.then((l) => {
+        console.log(`[benefits] ${id} completed late (${l.entries.length})`);
+        deliver(l);
+      })
+      .catch(lateFailed);
   }
   else {
     console.log(`[benefits] ${id} not ready after ${BENEFITS_GRACE_MS}ms, answering without them`);
-    void benefitsPromise.then((b) => {
-      if (b.entries.length > 0 || b.complete) {
-        console.log(`[benefits] ${id} arrived late (${b.entries.length})`);
-        track({ url: "/benefits", name: "benefits", data: { outcome: "late", ms: Date.now() - benefitsStarted, entries: b.entries.length, complete: b.complete } });
-        onLateBenefits?.(b.entries, b.complete);
-      }
-      void b.later?.then((l) => onLateBenefits?.(l.entries, l.complete));
-    });
+    benefitsPromise
+      .then((b) => {
+        if (b.entries.length > 0 || b.complete) {
+          console.log(`[benefits] ${id} arrived late (${b.entries.length})`);
+          track({ url: "/benefits", name: "benefits", data: { outcome: "late", ms: Date.now() - benefitsStarted, entries: b.entries.length, complete: b.complete } });
+          deliver(b);
+        }
+        b.later?.then(deliver).catch(lateFailed);
+      })
+      .catch(lateFailed);
   }
 
   return {
@@ -720,7 +721,7 @@ export async function fetchProduct(
     price,
     priceText: price === null ? null : formatMoney(shop, price),
     availability,
-    availabilityText: t.availability[availability] ?? t.unknownAvailability,
+    availabilityText: availabilityLabel(t, availability) ?? t.unknownAvailability,
     ...(condition ? { condition } : {}),
     rating,
     ratingCount,
