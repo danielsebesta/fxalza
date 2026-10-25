@@ -14,6 +14,7 @@ import { ALL_SHOPS, CZ, SITE_APEX, shopByTld, shopOfHost, siteHost, siteUrl, typ
 import { DEMO_CSP, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, demoHtml, landingCsp, landingHtml, problemHtml, robotsTxt, sitemapXml } from "./landing.ts";
 import { landingTexts } from "./landing-i18n.ts";
 import { allowFetch, anonymizedIp, identify, rateTier, retryAfterSeconds, type Requester } from "./ratelimit.ts";
+import { discordMd, plainText } from "./sanitize.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -448,7 +449,7 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
   const openUrl = buttonUrl(humanUrl, canonical);
   const historyUrl = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(canonical)}`;
 
-  const desc = p.description ? mdEsc(p.description) : "";
+  const desc = p.description ? discordMd(p.description) : "";
 
   const build = (lines: string[], withThumb: boolean, withDesc = true): string => {
     const parts = [`-# Alza.${shop.tld}`, titleLine];
@@ -530,7 +531,7 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
   let desc = parts.join(" • ");
   if (p?.description) {
     const room = DESC_MAX_BYTES - bytes(desc) - (desc ? 3 : 0);
-    let snippet = p.description;
+    let snippet = plainText(p.description);
     if (bytes(snippet) > room) {
       snippet = snippet.replace(/…$/, "");
       while (snippet.length > 0 && bytes(snippet) + 1 > room) snippet = snippet.slice(0, -4);

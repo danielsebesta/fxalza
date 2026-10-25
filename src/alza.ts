@@ -6,7 +6,7 @@ import { fetchUrl } from "./fetcher.ts";
 import { texts } from "./i18n.ts";
 import { kodCodes, parseKodList, type KodItem, type KodList } from "./kodlist.ts";
 import { parseProductPath, type Parsed } from "./parse.ts";
-import { decodeEntities, httpsUrlOn } from "./sanitize.ts";
+import { decodeEntities, emphasisMd, httpsUrlOn } from "./sanitize.ts";
 import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 
 export { stopSidecar } from "./fetcher.ts";
@@ -244,10 +244,10 @@ function cheapestPromo(promos: PriceCandidate[], kind: number): PriceCandidate |
   return best;
 }
 
-// A coupon does not combine with an ISIC price of its own. Cashback and a trade-in bonus do: each is the
-// amount Basic gets off its price, taken off the ISIC price. Alza often sends Basic's promo price for ISIC
-// too, and that price is then no help once the ISIC discount is already lower. A promo price that differs
-// from Basic's is ISIC's own and is kept. The Alza-Benefit-Prices extension works the cashback out the same way.
+// Coupons on ISIC are kept like on every other tier (same as Alza-Benefit-Prices). Cashback and a trade-in
+// still need a special case: Alza often sends Basic's promo price for ISIC too, so the ISIC discount is lost.
+// The amount Basic gets off is then taken off ISIC's own list price. A promo price that differs from Basic's
+// is ISIC's own and is kept. Only an estimate cheaper than Alza's selected price (coupon included) wins.
 function isicPrice(isic: TierResult, basic: TierResult | undefined, shop: Shop): PriceCandidate | null {
   const list = isic.main;
   const basicList = basic?.main;
@@ -271,8 +271,8 @@ function isicPrice(isic: TierResult, basic: TierResult | undefined, shop: Shop):
     const next = bonus(kind);
     if (next && (!best || next.amount < best.amount)) best = next;
   }
-  if (isic.selected?.coupon) return best ?? { ...list, promo: false, coupon: "" };
-  return best;
+  if (best && (!isic.selected || best.amount < isic.selected.amount - 0.004)) return best;
+  return null;
 }
 
 export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ): BenefitsResult {
@@ -405,22 +405,43 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ):
 
 // Schema.org reports an incoming shipment as InStock, because it can already be ordered. The stock label is what the page shows.
 // A quantity ("Na cestě > 5 ks") or a date ("Očekáváme 29. října 2026", "Erwartet: 29. Oktober 2026") rides on that label. Neither is part of the status.
+// Order matters: "není skladem" before "skladem", "prodej skončil" before a generic unavailable phrase.
 const STOCK_STATUS: Record<Shop["lang"], [RegExp, string][]> = {
   cs: [
+    [/prodej\s+skončil/i, "Discontinued"],
+    [/momentálně\s+nedostupné/i, "TemporarilyUnavailable"],
+    [/vyprodáno/i, "SoldOut"],
+    [/není\s+skladem/i, "OutOfStock"],
     [/očekáváme/i, "Expected"],
     [/na cestě/i, "OnTheWay"],
+    [/skladem/i, "InStock"],
   ],
   sk: [
+    [/predaj\s+skončil/i, "Discontinued"],
+    [/momentálne\s+nedostupné/i, "TemporarilyUnavailable"],
+    [/vypredané/i, "SoldOut"],
+    [/nie\s+je\s+skladom/i, "OutOfStock"],
     [/očakávame/i, "Expected"],
     [/na ceste/i, "OnTheWay"],
+    [/skladom/i, "InStock"],
   ],
   hu: [
+    [/megszűnt|eladás\s+véget\s+ért/i, "Discontinued"],
+    [/jelenleg\s+nem\s+elérhető|átmenetileg\s+nem\s+elérhető/i, "TemporarilyUnavailable"],
+    [/elfogyott/i, "SoldOut"],
+    [/nincs\s+raktáron/i, "OutOfStock"],
     [/várható/i, "Expected"],
     [/úton/i, "OnTheWay"],
+    [/raktáron/i, "InStock"],
   ],
   de: [
+    [/verkauf\s+beendet/i, "Discontinued"],
+    [/momentan\s+nicht\s+verfügbar/i, "TemporarilyUnavailable"],
+    [/ausverkauft/i, "SoldOut"],
+    [/nicht\s+auf\s+lager/i, "OutOfStock"],
     [/erwartet/i, "Expected"],
     [/unterwegs/i, "OnTheWay"],
+    [/auf\s+lager/i, "InStock"],
   ],
 };
 
@@ -430,6 +451,8 @@ export function availabilityKey(schemaAvailability: unknown, html: string, shop:
     const title = decodeEntities(m[1]!);
     for (const [re, key] of STOCK_STATUS[shop.lang]) if (re.test(title)) return key;
   }
+  // Alza's JSON-LD marks "Momentálně nedostupné" as Discontinued; only the page label means a true end of sale.
+  if (schema === "Discontinued") return "TemporarilyUnavailable";
   return schema;
 }
 
@@ -607,13 +630,14 @@ export function slugTitle(path: string): string {
 
 function cleanDescription(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
-  const t = decodeEntities(raw.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
-  if (t.length < 8) return undefined;
+  // Keep <strong>/<em> as Discord markdown; other tags are dropped. The Open Graph path strips the markers.
+  const t = emphasisMd(raw);
+  if (t.replace(/\*+/g, "").length < 8) return undefined;
   if (t.length <= 160) return t;
   const cut = t.slice(0, 160);
   const comma = cut.lastIndexOf(",");
   const at = comma > 60 ? comma : cut.lastIndexOf(" ");
-  return cut.slice(0, at > 60 ? at : 160).replace(/[\s,;:–-]+$/, "") + "…";
+  return cut.slice(0, at > 60 ? at : 160).replace(/[\s,;:–*-]+$/, "") + "…";
 }
 
 export async function fetchProduct(

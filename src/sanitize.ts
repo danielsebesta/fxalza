@@ -13,6 +13,49 @@ export function decodeEntities(t: string): string {
   );
 }
 
+function tidyText(t: string): string {
+  return t
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .trim();
+}
+
+// Decode entities, then strip tags. Alza's JSON-LD often escapes markup (&lt;strong&gt;…), so decode runs
+// before the strip; a second decode picks up entities that lived inside the tag content.
+function withoutTags(raw: string): string {
+  return decodeEntities(decodeEntities(raw).replace(/<[^>]*>/g, " "));
+}
+
+// Discord can show bold/italic, so <strong>/<b> and <em>/<i> become **…** / *…*; every other tag is dropped.
+export function emphasisMd(raw: string): string {
+  let t = decodeEntities(raw);
+  t = t.replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, "**$2**");
+  t = t.replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, "*$2*");
+  return tidyText(decodeEntities(t.replace(/<[^>]*>/g, " ")));
+}
+
+// Plain text for Open Graph and the page body: no tags, no leftover markdown markers.
+export function plainText(raw: string): string {
+  return tidyText(withoutTags(raw).replace(/\*+/g, ""));
+}
+
+// Private-use stand-ins so markdown escaping does not touch emphasis we intentionally keep for Discord.
+const BOLD = "\uE000";
+const ITALIC = "\uE001";
+
+// Description ready for a Discord markdown message: emphasis kept as * / **, other markdown escaped.
+export function discordMd(raw: string): string {
+  let t = decodeEntities(raw);
+  t = t.replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_, __, inner: string) => `${BOLD}${inner}${BOLD}`);
+  t = t.replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_, __, inner: string) => `${ITALIC}${inner}${ITALIC}`);
+  // cleanDescription may already have stored **…** / *…*
+  t = t.replace(/\*\*([^*]+)\*\*/g, (_, inner: string) => `${BOLD}${inner}${BOLD}`);
+  t = t.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner: string) => `${ITALIC}${inner}${ITALIC}`);
+  t = tidyText(decodeEntities(t.replace(/<[^>]*>/g, " ")));
+  t = t.replace(/([\\*_[\]~`|])/g, "\\$1");
+  return t.replaceAll(BOLD, "**").replaceAll(ITALIC, "*");
+}
+
 // An https address on `domain` or one of its subdomains, as an absolute string, or null. A user name or password in front of
 // the host ("https://evil.com@www.alza.cz/") is refused: the host check would pass and a browser would show the deceptive part.
 // A relative value is resolved against `base` when one is given.

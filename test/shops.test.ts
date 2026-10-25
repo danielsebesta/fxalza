@@ -115,7 +115,7 @@ test("ISIC gets its own cashback price when the API hands it the one of Basic", 
   assert.equal(buildBenefits(plain).entries.find((e) => e.kind === "tier")!.price, 950);
 });
 
-test("an ISIC discount of its own still takes cashback and a trade-in, and not a coupon", () => {
+test("an ISIC discount of its own still takes cashback and a trade-in, and keeps a cheaper coupon", () => {
   const promo = (amount: number, priceType: number, coupon = ""): PriceCandidate => ({
     amount,
     promo: true,
@@ -138,15 +138,45 @@ test("an ISIC discount of its own still takes cashback and a trade-in, and not a
   assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(700, 2)])], ["ISIC", row("ISIC", 950, [promo(700, 2)])]]), [650, "výkup"]);
   // a trade-in Alza already priced for ISIC stays as it came
   assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(700, 2)])], ["ISIC", row("ISIC", 950, [promo(650, 2)])]]), [650, "výkup"]);
-  // the coupon would be the cheapest figure and is left off; the copied cashback is worked out
+  // a coupon cheaper than the copied cashback is kept (same as the Alza-Benefit-Prices extension)
   assert.deepEqual(
     isic([
       ["Basic", row("Basic", 1000, [promo(800, 3, "ALZADNY20"), promo(900, 1)])],
       ["ISIC", row("ISIC", 950, [promo(760, 3, "ALZADNY20"), promo(900, 1)])],
     ]),
-    [850, "cashback"],
+    [760, "kód"],
   );
-  assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(800, 3, "ALZADNY20")])], ["ISIC", row("ISIC", 950, [promo(760, 3, "ALZADNY20")])]]), [950, null]);
+  assert.deepEqual(isic([["Basic", row("Basic", 1000, [promo(800, 3, "ALZADNY20")])], ["ISIC", row("ISIC", 950, [promo(760, 3, "ALZADNY20")])]]), [760, "kód"]);
+  // cashback wins only when it undercuts the coupon
+  assert.deepEqual(
+    isic([
+      ["Basic", row("Basic", 1000, [promo(900, 3, "ALZADNY10"), promo(850, 1)])],
+      ["ISIC", row("ISIC", 950, [promo(900, 3, "ALZADNY10"), promo(850, 1)])],
+    ]),
+    [800, "cashback"],
+  );
+});
+
+test("ISIC with the same coupon price as Silver shares one line", () => {
+  const coupon = (amount: number): PriceCandidate => ({ amount, promo: true, priceType: 3, name: "Koupit s kódem ALZADNY40", coupon: "ALZADNY40" });
+  const row = (name: string, main: number, withCode: number): TierResult => ({
+    tier: name,
+    hidden: false,
+    main: price(main),
+    selected: coupon(withCode),
+    promos: [coupon(withCode)],
+  });
+  const entries = buildBenefits(
+    new Map([
+      ["Basic", row("Basic", 1831, 1099)],
+      ["Silver", row("Silver", 1364, 819)],
+      ["ISIC", row("ISIC", 1364, 819)],
+    ]),
+  ).entries.filter((e) => e.kind === "tier");
+  assert.deepEqual(
+    entries.map((e) => [e.label, e.price, e.note]),
+    [["Silver/ISIC", 819, "kód"]],
+  );
 });
 
 const price = (amount: number): PriceCandidate => ({ amount, promo: false, priceType: null, name: "", coupon: "" });

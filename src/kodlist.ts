@@ -1,5 +1,5 @@
 // Alza's "Výpis zboží" page (alza.cz/kod/<code>;<code>;...) lists several products by their order codes.
-import { decodeEntities, httpsUrlOn } from "./sanitize.ts";
+import { httpsUrlOn, plainText } from "./sanitize.ts";
 
 export interface KodItem {
   id: string;
@@ -19,7 +19,7 @@ export interface KodList {
 }
 
 function text(raw: string): string {
-  return decodeEntities(raw.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+  return plainText(raw);
 }
 
 // The raw page links products relatively ("/amd-ryzen-5-9600x-d12482042.htm"), a browser's saved copy has them absolute.

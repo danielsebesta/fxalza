@@ -89,6 +89,19 @@ test("an incoming shipment stays on the way when schema.org calls it in stock", 
   assert.equal(availabilityKey(undefined, "<html></html>"), "unknown");
 });
 
+test("Alza's Discontinued schema is temporary unavailability unless the page says the sale ended", () => {
+  const label = (t: string) => `<span class="stcStock avlVal avl0 none" title="${t}">${t}</span>`;
+  const schema = "https://schema.org/Discontinued";
+  assert.equal(availabilityKey(schema, "<html></html>", SHOPS.cz), "TemporarilyUnavailable");
+  assert.equal(availabilityKey(schema, label("Momentálně nedostupné"), SHOPS.cz), "TemporarilyUnavailable");
+  assert.equal(availabilityKey(schema, label("Prodej skončil"), SHOPS.cz), "Discontinued");
+  assert.equal(availabilityKey(schema, label("Momentálne nedostupné"), SHOPS.sk), "TemporarilyUnavailable");
+  assert.equal(availabilityKey(schema, label("Predaj skončil"), SHOPS.sk), "Discontinued");
+  assert.equal(texts("cs").availability.TemporarilyUnavailable, "Momentálně nedostupné");
+  assert.equal(texts("cs").availability.Discontinued, "Prodej skončil");
+  assert.equal(texts("sk").availability.TemporarilyUnavailable, "Momentálne nedostupné");
+});
+
 test("an expected date and a piece count are not part of the status", () => {
   const label = (t: string) => `<span class="stcStock avlVal avl4 none" title="${t}">${t}</span>`;
   const schema = "https://schema.org/PreOrder";

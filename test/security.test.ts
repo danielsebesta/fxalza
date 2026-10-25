@@ -3,11 +3,32 @@ import { test } from "node:test";
 import { readBodyCapped } from "../src/fetcher.ts";
 import { parseKodList } from "../src/kodlist.ts";
 import { clientKey } from "../src/ratelimit.ts";
-import { decodeEntities, httpsUrlOn } from "../src/sanitize.ts";
+import { decodeEntities, discordMd, emphasisMd, httpsUrlOn, plainText } from "../src/sanitize.ts";
 import { parseSiteDomains } from "../src/shops.ts";
 
 test("a numeric entity outside Unicode is left as written instead of throwing", () => {
   assert.equal(decodeEntities("A &amp; B &#233; &#x1F600; &#99999999999; &#xFFFFFFFF; &bogus;"), "A & B é 😀 &#99999999999; &#xFFFFFFFF; &bogus;");
+});
+
+test("plainText strips tags whether they are literal or entity-encoded", () => {
+  assert.equal(
+    plainText("krabicová verze, &lt;strong&gt;české titulky&lt;/strong&gt;, žánr: simulátor"),
+    "krabicová verze, české titulky, žánr: simulátor",
+  );
+  assert.equal(plainText("Hra na konzoli, <strong>české titulky</strong>, žánr"), "Hra na konzoli, české titulky, žánr");
+  assert.equal(plainText("A &amp; B <em>bold</em>"), "A & B bold");
+  assert.equal(plainText("už **tučné** z cache"), "už tučné z cache");
+});
+
+test("Discord keeps strong/em as markdown and drops every other tag", () => {
+  assert.equal(
+    emphasisMd("krabicová verze, &lt;strong&gt;české titulky&lt;/strong&gt;, žánr"),
+    "krabicová verze, **české titulky**, žánr",
+  );
+  assert.equal(discordMd("verze, <strong>české titulky</strong>, žánr"), "verze, **české titulky**, žánr");
+  assert.equal(discordMd("už **české titulky** z cache"), "už **české titulky** z cache");
+  assert.equal(discordMd("cena <span>100</span> hvězda* a _podtrženo_"), "cena 100 hvězda\\* a \\_podtrženo\\_");
+  assert.equal(discordMd("s <em>kurzívou</em> a <b>tučným</b>"), "s *kurzívou* a **tučným**");
 });
 
 test("httpsUrlOn takes Alza's own https addresses and nothing that only looks like one", () => {
