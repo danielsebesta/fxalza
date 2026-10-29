@@ -76,6 +76,18 @@ function withDeadline<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 
+// Products cached before language prefixes were dropped still carry one in their canonical link.
+function cleanCanonical(url: string | undefined): string | undefined {
+  if (!url) return url;
+  try {
+    const c = new URL(url);
+    c.pathname = withoutLanguagePrefix(c.pathname);
+    return c.toString();
+  } catch {
+    return url;
+  }
+}
+
 function refresh(shop: Shop, id: string, path: string): Promise<ProductData> {
   const key = keyOf(shop, id);
   let p = inflight.get(key);
@@ -92,6 +104,8 @@ function refresh(shop: Shop, id: string, path: string): Promise<ProductData> {
       }
       const current = getCached(key, true);
       if (!current || current.fetchedAt !== produced.fetchedAt) return;
+      // A late fetch that found fewer tiers than the ones already served (typically none) must not wipe them.
+      if (benefits.length < current.benefits.length) return;
       const { partial: _, ...rest } = current;
       putCached(key, { ...rest, benefits, ...(complete ? {} : { partial: true as const }) });
     };
@@ -510,7 +524,7 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
   const slugged = slugTitle(path);
   const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
   const fallbackTitle = slugged === "Produkt" && productId ? t.productFromAlza(productId) : slugged;
-  const canonical = p?.canonicalUrl ?? `https://${shop.host}${path}`;
+  const canonical = cleanCanonical(p?.canonicalUrl) ?? `https://${shop.host}${path}`;
 
   const offers = (p?.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
   const cheapest = offers.reduce<BenefitEntry | null>((best, b) => (best === null || b.price < best.price ? b : best), null);
@@ -899,7 +913,7 @@ const server = http.createServer(async (req, res) => {
 
     if (!isBot) {
       const known = getCached(keyOf(shop, parsed.id), true);
-      const target = outbound(known?.canonicalUrl ?? `https://${shop.host}${parsed.path}`, carriedQuery(u.searchParams));
+      const target = outbound(cleanCanonical(known?.canonicalUrl) ?? `https://${shop.host}${parsed.path}`, carriedQuery(u.searchParams));
       evt = { url: `/product/${parsed.id}`, name: "click", data: { product: parsed.id, shop: shop.code, ...(known ? { name: shortName(known.name, 80) } : {}), ...visitorData(req, who) } };
       res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();

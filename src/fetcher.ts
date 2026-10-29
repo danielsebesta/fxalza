@@ -153,6 +153,12 @@ function paidSignal(timeoutMs: number, signal: AbortSignal): AbortSignal {
   return AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]);
 }
 
+// A 403 that survives the retry means Alza has blocked the sidecar's session. For a while the rest go straight to Firecrawl,
+// so the requests of one product do not each spend their time on a sidecar that is going to fail.
+const SIDECAR_BLOCK_MS = Number(process.env.SIDECAR_BLOCK_MS ?? 15_000);
+let sidecarBlockedUntil = 0;
+const sidecarBlocked = (): boolean => sidecarBlockedUntil > Date.now() && firecrawl.available();
+
 const providers: Provider[] = [
   {
     name: "sidecar",
@@ -165,6 +171,7 @@ const providers: Provider[] = [
         const again = await sidecar.request(url, { headers: opts.headers, timeoutMs });
         console.log(`[fetch] sidecar 403 retried -> ${again.error ? "error" : again.status} ${new URL(url).pathname}`);
         res = again;
+        if (!res.error && res.status === 403) sidecarBlockedUntil = Date.now() + SIDECAR_BLOCK_MS;
       }
       if (res.error) throw new Error(res.error);
       if (res.truncated) throw new Error(`sidecar: response larger than the sidecar passes on (HTTP ${res.status})`);
@@ -236,7 +243,7 @@ interface Attempt {
 }
 
 function runnable(p: Provider): boolean {
-  return p.enabled() && (downUntil.get(p.name) ?? 0) <= Date.now();
+  return p.enabled() && (downUntil.get(p.name) ?? 0) <= Date.now() && !(p.name === "sidecar" && sidecarBlocked());
 }
 
 async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: number, signal: AbortSignal): Promise<Attempt> {
@@ -290,7 +297,7 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
   const running = new Map<Promise<void>, AbortController>();
 
   const order = list
-    .map((p, i) => ({ p, rank: p.name === "sidecar" ? -2 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
+    .map((p, i) => ({ p, rank: p.name === "sidecar" ? -2 : p.name === "firecrawl" && sidecarBlocked() ? -1.5 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
     .sort((a, b) => a.rank - b.rank || (opts.prefer?.indexOf(a.p.name) ?? 0) - (opts.prefer?.indexOf(b.p.name) ?? 0))
     .map((x) => x.p);
 
