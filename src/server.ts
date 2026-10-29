@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fetchKodList, fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
 import { platformOf, track, type TrackEvent } from "./analytics.ts";
 import { isKodPath, kodCodes, type KodList } from "./kodlist.ts";
-import { hasCacheBustSuffix, isExtensionHost, parseProductPath, type Parsed } from "./parse.ts";
+import { hasCacheBustSuffix, isExtensionHost, parseProductPath, withoutLanguagePrefix, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
 import { sidecarStats } from "./fetcher.ts";
 import { cacheSize, flushCache, getCached, peekCached, putCached } from "./cache.ts";
@@ -752,7 +752,7 @@ const server = http.createServer(async (req, res) => {
 
     const host = hostOf(req);
     if (!isBot && !hostShop && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {
-      const p = parseProductPath(u.pathname, u.searchParams.get("dq"));
+      const p = parseProductPath(withoutLanguagePrefix(u.pathname), u.searchParams.get("dq"));
       res.writeHead(302, { Location: p ? outbound(`https://www.alza.cz${p.path}`, carriedQuery(u.searchParams)) : `${PUBLIC_URL}/`, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
       return;
@@ -789,14 +789,17 @@ const server = http.createServer(async (req, res) => {
       sendStatic(req, res, LLMS_TXT, "text/plain; charset=utf-8", { "x-robots-tag": "all" }, 3600);
       return;
     }
-    let pathname = u.pathname;
+    // A language prefix (alza.cz/EN/..., also a lowercase /en/) is dropped before anything reads the path, so a preview
+    // and the link the visitor is sent on stay in the default language of the domain. It runs before and after the host
+    // is cut off the path of a pasted link, since /EN/https://www.alza.xx/... and /www.alza.xx/EN/... are both possible.
+    let pathname = withoutLanguagePrefix(u.pathname);
     const alza = ALZA_HOST.exec(pathname);
     if (alza) {
       const tld = alza[2]!.toLowerCase();
       const linked = shopByTld(tld);
       if (linked) {
         shop = linked;
-        pathname = alza[3] ?? "/";
+        pathname = withoutLanguagePrefix(alza[3] ?? "/");
       } else {
         const target = `https://${alza[1]!.toLowerCase()}${alza[3] ?? "/"}${u.search}`;
         evt = { url: logged, name: "unsupported_domain", data: { tld, kind: isBot ? platformOf(ua) : "human" } };
@@ -940,7 +943,7 @@ const server = http.createServer(async (req, res) => {
     let fallbackQuery = "";
     try {
       const requested = new URL(req.url ?? "/", "http://localhost");
-      fallback = parseProductPath(requested.pathname, requested.searchParams.get("dq"));
+      fallback = parseProductPath(withoutLanguagePrefix(requested.pathname), requested.searchParams.get("dq"));
       fallbackQuery = carriedQuery(requested.searchParams);
     } catch {
       fallback = null;

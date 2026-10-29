@@ -5,7 +5,7 @@ import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
 import { texts } from "./i18n.ts";
 import { kodCodes, parseKodList, type KodItem, type KodList } from "./kodlist.ts";
-import { parseProductPath, type Parsed } from "./parse.ts";
+import { parseProductPath, withoutLanguagePrefix, type Parsed } from "./parse.ts";
 import { decodeEntities, emphasisMd, httpsUrlOn } from "./sanitize.ts";
 import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 
@@ -692,7 +692,9 @@ export async function fetchProduct(
   const availability = availabilityKey(offers?.availability, html, shop);
 
   const claimed = offers?.url ? String(offers.url) : typeof p["@id"] === "string" ? String(p["@id"]).replace(/#.*$/, "") : null;
-  const canonicalUrl = (claimed && httpsUrlOn(claimed, `alza.${shop.tld}`)) || `https://${shop.host}${path}`;
+  const claimedUrl = claimed && httpsUrlOn(claimed, `alza.${shop.tld}`);
+  // The link to Hlídač shopů is built from this, and it does not know Alza's language prefixes (alza.cz/EN/...).
+  const canonicalUrl = claimedUrl ? (() => { const c = new URL(claimedUrl); c.pathname = withoutLanguagePrefix(c.pathname); return c.toString(); })() : `https://${shop.host}${path}`;
   if (image && !httpsUrlOn(image, "alza.cz") && !httpsUrlOn(image, `alza.${shop.tld}`)) image = null;
 
   let benefits: BenefitEntry[] = [];
