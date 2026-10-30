@@ -66,7 +66,7 @@ export function parseKodList(html: string, requested: number): KodList | null {
     const price = priceRaw ? czk(text(priceRaw)) : null;
     const was = wasRaw ? czk(text(wasRaw)) : null;
     // The box adds a quantity ("Skladem > 5 ks") or a date ("Očekáváme 29. října 2026", "Na cestě > 5 ks" plus a date line). Keep the status word.
-    const availability = /(Není skladem|Na cestě|Očekáváme|Skladem|Vyprodáno)/i.exec(text(row))?.[1] ?? null;
+    const availability = /(Není skladem|Na cestě|Očekáváme|Skladem u dodavatele|Skladem|Vyprodáno)/i.exec(text(row))?.[1] ?? null;
     items.push({
       id,
       name,

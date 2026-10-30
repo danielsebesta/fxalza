@@ -31,6 +31,7 @@ export interface Texts {
 const cs: Texts = {
   availability: {
     InStock: "Skladem",
+    SupplierStock: "Skladem u dodavatele",
     OnTheWay: "Na cestě",
     Expected: "Očekáváme",
     OutOfStock: "Není skladem",
@@ -72,6 +73,7 @@ const cs: Texts = {
 const sk: Texts = {
   availability: {
     InStock: "Skladom",
+    SupplierStock: "Skladom u dodávateľa",
     OnTheWay: "Na ceste",
     Expected: "Očakávame",
     OutOfStock: "Nie je skladom",
@@ -113,6 +115,7 @@ const sk: Texts = {
 const hu: Texts = {
   availability: {
     InStock: "Raktáron",
+    SupplierStock: "Beszállítónál raktáron",
     OnTheWay: "Úton",
     Expected: "Várható",
     OutOfStock: "Nincs raktáron",
@@ -154,6 +157,7 @@ const hu: Texts = {
 const de: Texts = {
   availability: {
     InStock: "Auf Lager",
+    SupplierStock: "Beim Lieferanten auf Lager",
     OnTheWay: "Unterwegs",
     Expected: "Erwartet",
     OutOfStock: "Nicht auf Lager",

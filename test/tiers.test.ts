@@ -89,6 +89,15 @@ test("an incoming shipment stays on the way when schema.org calls it in stock", 
   assert.equal(availabilityKey(undefined, "<html></html>"), "unknown");
 });
 
+test("stock at the supplier is told apart from stock at Alza", () => {
+  const label = (t: string) => `<span class="stcStock avlVal avl0 none" title="${t}">${t}</span>`;
+  const schema = "https://schema.org/InStock";
+  assert.equal(availabilityKey(schema, label("Skladem u dodavatele"), SHOPS.cz), "SupplierStock");
+  assert.equal(availabilityKey(schema, label("Skladom u dodávateľa"), SHOPS.sk), "SupplierStock");
+  assert.equal(availabilityKey(schema, label("Skladem > 5 ks"), SHOPS.cz), "InStock");
+  assert.equal(availabilityKey(schema, label("Není skladem u dodavatele"), SHOPS.cz), "OutOfStock");
+});
+
 test("Alza's Discontinued schema is temporary unavailability unless the page says the sale ended", () => {
   const label = (t: string) => `<span class="stcStock avlVal avl0 none" title="${t}">${t}</span>`;
   const schema = "https://schema.org/Discontinued";

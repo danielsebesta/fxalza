@@ -415,6 +415,8 @@ const STOCK_STATUS: Record<Shop["lang"], [RegExp, string][]> = {
     [/není\s+skladem/i, "OutOfStock"],
     [/očekáváme/i, "Expected"],
     [/na cestě/i, "OnTheWay"],
+    // the supplier has it, not Alza: schema.org and the plain "Skladem" both call that in stock
+    [/u\s+dodavatele/i, "SupplierStock"],
     [/skladem/i, "InStock"],
   ],
   sk: [
@@ -424,6 +426,7 @@ const STOCK_STATUS: Record<Shop["lang"], [RegExp, string][]> = {
     [/nie\s+je\s+skladom/i, "OutOfStock"],
     [/očakávame/i, "Expected"],
     [/na ceste/i, "OnTheWay"],
+    [/u\s+dodávateľa/i, "SupplierStock"],
     [/skladom/i, "InStock"],
   ],
   hu: [
