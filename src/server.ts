@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fetchKodList, fetchProduct, resolveProductPath, slugTitle, stopSidecar, UpstreamError, type BenefitEntry, type ProductData } from "./alza.ts";
 import { platformOf, track, type TrackEvent } from "./analytics.ts";
 import { isKodPath, kodCodes, type KodList } from "./kodlist.ts";
-import { hasCacheBustSuffix, isExtensionHost, parseProductPath, withoutLanguagePrefix, type Parsed } from "./parse.ts";
+import { isExtensionHost, isRetryRequest, parseProductPath, withoutLanguagePrefix, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
 import { sidecarStats } from "./fetcher.ts";
 import { cacheSize, flushCache, getCached, peekCached, putCached } from "./cache.ts";
@@ -922,7 +922,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const trace: { cache?: string } = {};
-    const bust = hasCacheBustSuffix(pathname);
+    const bust = isRetryRequest(pathname, req.url ?? "");
     const { data, stale, limited, missing, timedOut } = await getProduct(shop, parsed.id, parsed.path, who, bust, trace);
     const state = limited ? "limited" : !data ? (missing ? "missing" : timedOut ? "timeout" : "error") : data.partial ? "partial" : stale ? "stale" : "ok";
     evt = {

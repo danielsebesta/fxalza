@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hasCacheBustSuffix, isExtensionHost, parseProductPath, withoutLanguagePrefix } from "../src/parse.ts";
+import { hasCacheBustSuffix, isExtensionHost, isRetryRequest, parseProductPath, withoutLanguagePrefix } from "../src/parse.ts";
 
 test("parses slug product paths", () => {
   assert.deepEqual(parseProductPath("/sport/bery-jones-100-g-d10786234.htm"), {
@@ -79,4 +79,12 @@ test("the extension subdomains of the apex are recognised, nothing else is", () 
   assert.equal(isExtensionHost("ext.example.com", "fxalza.cz"), false);
   assert.equal(isExtensionHost("a.ext.fxalza.cz", "fxalza.cz"), false);
   assert.equal(isExtensionHost("notext.fxalza.cz", "fxalza.cz"), false);
+});
+
+test("a question mark or a letter after the link asks for another try, the plain link does not", () => {
+  const p = "/vention-power-bank-d12352171.htm";
+  assert.equal(isRetryRequest(p, p), false);
+  assert.equal(isRetryRequest(p, p + "?"), true);
+  assert.equal(isRetryRequest(p, p + "?evt=ac&pos=1"), true);
+  assert.equal(isRetryRequest(p + "x", p + "x"), true);
 });

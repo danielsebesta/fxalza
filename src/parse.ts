@@ -8,6 +8,12 @@ export function hasCacheBustSuffix(pathname: string): boolean {
   return !/(?:-d\d{1,12}(?:\.htm)?|\/d?\d{1,12})\/?$/i.test(pathname);
 }
 
+// A link that was changed on purpose is a request for another try at a partial result: a letter after the path, or a question mark
+// (which leaves the path as it is, so it is looked for in the raw address).
+export function isRetryRequest(pathname: string, rawUrl: string): boolean {
+  return hasCacheBustSuffix(pathname) || rawUrl.includes("?");
+}
+
 // Alza lets a visitor read any shop in other languages, which it writes by prefixing the path with a language code
 // (alza.cz/EN/..., alza.cz/DE/...) in capitals. Nothing real of a shop starts with a capital pair, so such a segment is
 // dropped, and with it the lowercase spelling of the two languages the shops do offer in their own links: a preview and
