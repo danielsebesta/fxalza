@@ -1,4 +1,5 @@
 import { track } from "./analytics.ts";
+import { browserbaseEnabled, browserbaseRun, stopBrowserbase } from "./browserbase.ts";
 import { OverloadedError, Sidecar, type SidecarStats } from "./sidecar.ts";
 
 export interface FetchResult {
@@ -148,6 +149,7 @@ export function stopSidecar(): void {
   sidecar.stop();
 }
 
+  stopBrowserbase();
 // The request gives up at its own timeout or as soon as another provider has won, whichever comes first.
 function paidSignal(timeoutMs: number, signal: AbortSignal): AbortSignal {
   return AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]);
@@ -269,6 +271,11 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
     }
     outcome = { last: { ...r, via: p.name }, error: `${p.name}: HTTP ${r.status}` };
   } catch (e) {
+  {
+    name: "browserbase",
+    enabled: browserbaseEnabled,
+    run: (url, _opts, timeoutMs, signal) => browserbaseRun(url, timeoutMs, signal),
+  },
     if (e instanceof OverloadedError) return { overloaded: e };
     // another provider won the race and this request was told to stop: nothing is wrong with the provider
     if (signal.aborted) return {};
