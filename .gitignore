@@ -152,3 +152,7 @@ vite.config.ts.timestamp-*
 # fxalza runtime files
 data/
 cloudflared.exe
+
+# Cloudflare Worker: the real wrangler.toml (its name is part of the address) stays local
+worker/wrangler.toml
+worker/.wrangler/

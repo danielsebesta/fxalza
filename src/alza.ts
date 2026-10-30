@@ -151,7 +151,7 @@ export async function fetchTier(id: string, tier: TierDef, shop: Shop = CZ): Pro
     res = await fetchUrl(url, {
       headers: { Accept: "application/json, text/html;q=0.9" },
       timeoutMs: 8000,
-      prefer: ["firecrawl"],
+      prefer: ["cfworker", "cfworker2", "cfworker3", "firecrawl"],
       country: shop.country,
     });
   } catch {
@@ -184,7 +184,7 @@ interface BenefitsResult {
   later?: Promise<BenefitsResult>;
 }
 
-const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 1200);
+const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 3200);
 const LEAN_TIERS = process.env.TIERS_LEAN !== "0";
 const CLUB_FOLLOWERS = ["Silver", "Bronze"];
 const firstTiers = (shop: Shop): TierDef[] => (LEAN_TIERS ? tiersFor(shop).filter((t) => !CLUB_FOLLOWERS.includes(t.name)) : tiersFor(shop));

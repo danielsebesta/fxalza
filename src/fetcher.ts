@@ -19,6 +19,8 @@ export interface FetchOpts {
 export interface Provider {
   name: string;
   enabled: () => boolean;
+  // costs nothing per request, so it is not counted against the paid budget and is not left out for long after a failure
+  free?: boolean;
   // signal fires when another provider already answered, so a hedged request that lost can let go of its connection
   run: (url: string, opts: FetchOpts, timeoutMs: number, signal: AbortSignal) => Promise<{ status: number; body: string }>;
 }
@@ -147,9 +149,9 @@ const firecrawl = new KeyPool("firecrawl", process.env.FIRECRAWL_KEY);
 
 export function stopSidecar(): void {
   sidecar.stop();
+  stopBrowserbase();
 }
 
-  stopBrowserbase();
 // The request gives up at its own timeout or as soon as another provider has won, whichever comes first.
 function paidSignal(timeoutMs: number, signal: AbortSignal): AbortSignal {
   return AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]);
@@ -157,9 +159,29 @@ function paidSignal(timeoutMs: number, signal: AbortSignal): AbortSignal {
 
 // A 403 that survives the retry means Alza has blocked the sidecar's session. For a while the rest go straight to Firecrawl,
 // so the requests of one product do not each spend their time on a sidecar that is going to fail.
+// Each block that follows straight after the last one is twice as long, up to the maximum, and one answer from the sidecar resets it.
 const SIDECAR_BLOCK_MS = Number(process.env.SIDECAR_BLOCK_MS ?? 15_000);
+const SIDECAR_BLOCK_MAX_MS = Number(process.env.SIDECAR_BLOCK_MAX_MS ?? 5 * 60_000);
 let sidecarBlockedUntil = 0;
-const sidecarBlocked = (): boolean => sidecarBlockedUntil > Date.now() && firecrawl.available();
+let sidecarBlockMs = 0;
+// Workers of our own on Cloudflare (see worker/), "url|token" separated by commas, the first one is the primary. The addresses are
+// kept in the environment only: they are not in the repository and no response or log line carries them.
+interface CfWorker {
+  name: string;
+  url: string;
+  token: string;
+}
+export function parseCfWorkers(raw: string | undefined): CfWorker[] {
+  return (raw ?? "")
+    .split(",")
+    .map((x) => x.trim().split("|"))
+    .filter(([url, token]) => /^https:\/\//.test(url ?? "") && !!token)
+    .map(([url, token], i) => ({ name: i === 0 ? "cfworker" : `cfworker${i + 1}`, url: url!.replace(/\/$/, ""), token: token! }));
+}
+const cfWorkers = parseCfWorkers(process.env.CF_WORKERS);
+// The provider the requests go to first while the sidecar is blocked: the primary worker when there is one, else Firecrawl.
+const fallbackName = (): string | null => (cfWorkers[0] ? cfWorkers[0].name : firecrawl.available() ? "firecrawl" : null);
+const sidecarBlocked = (): boolean => sidecarBlockedUntil > Date.now() && fallbackName() !== null;
 
 const providers: Provider[] = [
   {
@@ -167,19 +189,43 @@ const providers: Provider[] = [
     enabled: () => process.env.SIDECAR_DISABLED !== "1",
     async run(url, opts, timeoutMs) {
       let res = await sidecar.request(url, { headers: opts.headers, timeoutMs });
-      if (!res.error && res.status === 403) {
+      if (!res.error && res.status === 403 && sidecarBlockMs === 0) {
         // a fresh session sometimes gets a one-off 403, a second try is cheaper than a paid fallback
         await new Promise((resolve) => setTimeout(resolve, 300));
         const again = await sidecar.request(url, { headers: opts.headers, timeoutMs });
         console.log(`[fetch] sidecar 403 retried -> ${again.error ? "error" : again.status} ${new URL(url).pathname}`);
         res = again;
-        if (!res.error && res.status === 403) sidecarBlockedUntil = Date.now() + SIDECAR_BLOCK_MS;
       }
+      if (!res.error && res.status === 403) {
+        // the requests of one product start together, so only the first of them to fail counts
+        if (sidecarBlockedUntil <= Date.now()) {
+          sidecarBlockMs = Math.min(sidecarBlockMs ? sidecarBlockMs * 2 : SIDECAR_BLOCK_MS, SIDECAR_BLOCK_MAX_MS);
+          sidecarBlockedUntil = Date.now() + sidecarBlockMs;
+        }
+      } else if (!res.error && res.status < 400) sidecarBlockMs = 0;
       if (res.error) throw new Error(res.error);
       if (res.truncated) throw new Error(`sidecar: response larger than the sidecar passes on (HTTP ${res.status})`);
       return { status: res.status, body: Buffer.from(res.body, "base64").toString("utf8") };
     },
   },
+  ...cfWorkers.map(
+    (w): Provider => ({
+      // Asks Alza from Cloudflare's network, which lets that through without a challenge.
+      name: w.name,
+      free: true,
+      enabled: () => true,
+      async run(url, opts, timeoutMs, signal) {
+        const res = await fetch(`${w.url}/?url=${encodeURIComponent(url)}`, {
+          headers: { "x-token": w.token, ...(opts.headers?.Accept ? { accept: opts.headers.Accept } : {}) },
+          signal: paidSignal(timeoutMs, signal),
+        });
+        const body = await readBodyCapped(res);
+        if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+        const upstream = Number(res.headers.get("x-upstream-status")) || 502;
+        return { status: res.headers.get("x-cf-mitigated") ? 403 : upstream, body };
+      },
+    }),
+  ),
   {
     name: "brightdata",
     enabled: () => brightdata.available(),
@@ -225,6 +271,11 @@ const providers: Provider[] = [
         return { status: j.data?.metadata?.statusCode ?? 200, body: j.data?.rawHtml ?? "" };
       }, signal),
   },
+  {
+    name: "browserbase",
+    enabled: browserbaseEnabled,
+    run: (url, _opts, timeoutMs, signal) => browserbaseRun(url, timeoutMs, signal),
+  },
 ];
 
 const downUntil = new Map<string, number>();
@@ -249,14 +300,15 @@ function runnable(p: Provider): boolean {
 }
 
 async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: number, signal: AbortSignal): Promise<Attempt> {
-  if (p.name !== "sidecar") {
+  const paid = p.name !== "sidecar" && !p.free;
+  if (paid) {
     if (!paidBudgetLeft()) {
       track({ url: "/upstream", name: "paid_budget_exhausted", data: { provider: p.name } });
       return { error: `${p.name}: daily budget of ${PAID_DAILY_MAX} paid requests used up` };
     }
     paidUsed++;
   }
-  const t = p.name === "sidecar" ? timeoutMs : Math.max(timeoutMs, PAID_MIN_TIMEOUT_MS);
+  const t = paid ? Math.max(timeoutMs, PAID_MIN_TIMEOUT_MS) : timeoutMs;
   const started = Date.now();
   let status = 0;
   let outcome: Attempt;
@@ -264,28 +316,23 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
     const r = await p.run(url, opts, t, signal);
     status = r.status;
     if (usable(r.status, r.body)) {
-      track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: true, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
+      track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: true, status, ms: Date.now() - started, paid } });
       console.log(`[fetch] ${p.name} ${r.status} ${Date.now() - started}ms ${new URL(url).pathname}${new URL(url).search}`);
       failStreak.set(p.name, 0);
       return { result: { ...r, via: p.name } };
     }
     outcome = { last: { ...r, via: p.name }, error: `${p.name}: HTTP ${r.status}` };
   } catch (e) {
-  {
-    name: "browserbase",
-    enabled: browserbaseEnabled,
-    run: (url, _opts, timeoutMs, signal) => browserbaseRun(url, timeoutMs, signal),
-  },
     if (e instanceof OverloadedError) return { overloaded: e };
     // another provider won the race and this request was told to stop: nothing is wrong with the provider
     if (signal.aborted) return {};
     outcome = { error: `${p.name}: ${e instanceof Error ? e.message : e}` };
   }
-  track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: false, status, ms: Date.now() - started, paid: p.name !== "sidecar" } });
+  track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: false, status, ms: Date.now() - started, paid } });
   const streak = (failStreak.get(p.name) ?? 0) + 1;
   failStreak.set(p.name, streak);
-  if (p.name !== "sidecar" || streak >= SIDECAR_STREAK) {
-    downUntil.set(p.name, Date.now() + (p.name === "sidecar" ? SIDECAR_COOLDOWN_MS : COOLDOWN_MS));
+  if (paid || streak >= SIDECAR_STREAK) {
+    downUntil.set(p.name, Date.now() + (paid ? COOLDOWN_MS : SIDECAR_COOLDOWN_MS));
   }
   console.warn(`[fetch] ${p.name} failed for ${url} (${outcome.error}), trying next`);
   return outcome;
@@ -304,7 +351,7 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
   const running = new Map<Promise<void>, AbortController>();
 
   const order = list
-    .map((p, i) => ({ p, rank: p.name === "sidecar" ? -2 : p.name === "firecrawl" && sidecarBlocked() ? -1.5 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
+    .map((p, i) => ({ p, rank: p.name === "sidecar" ? -2 : p.name === fallbackName() && sidecarBlocked() ? -1.5 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
     .sort((a, b) => a.rank - b.rank || (opts.prefer?.indexOf(a.p.name) ?? 0) - (opts.prefer?.indexOf(b.p.name) ?? 0))
     .map((x) => x.p);
 
