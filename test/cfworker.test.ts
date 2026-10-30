@@ -28,3 +28,29 @@ test("a free provider that fails hands over to the next one", async () => {
   assert.equal(r.via, "free-b");
   assert.equal(r.body, "ok");
 });
+
+const stub = (name: string, status: number, calls: string[], free = false): Provider => ({
+  name,
+  free,
+  enabled: () => true,
+  run: async () => {
+    calls.push(name);
+    return { status, body: `<html>${name}</html>` };
+  },
+});
+
+test("our own workers go before the sidecar, which is left alone when they answer", async () => {
+  const calls: string[] = [];
+  const list = [stub("sidecar", 200, calls), stub("cfworker", 200, calls, true), stub("cfworker2", 200, calls, true), stub("paid", 200, calls)];
+  const r = await fetchWith(list, "https://www.alza.cz/x-d1.htm", {}, 50);
+  assert.equal(r.via, "cfworker");
+  assert.deepEqual(calls, ["cfworker"]);
+});
+
+test("the sidecar comes after the workers and before the paid providers", async () => {
+  const calls: string[] = [];
+  const list = [stub("sidecar", 200, calls), stub("cfworker", 403, calls, true), stub("cfworker2", 403, calls, true), stub("paid", 200, calls)];
+  const r = await fetchWith(list, "https://www.alza.cz/x-d1.htm", {}, 50);
+  assert.equal(r.via, "sidecar");
+  assert.deepEqual(calls, ["cfworker", "cfworker2", "sidecar"]);
+});

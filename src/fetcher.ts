@@ -157,8 +157,8 @@ function paidSignal(timeoutMs: number, signal: AbortSignal): AbortSignal {
   return AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]);
 }
 
-// A 403 that survives the retry means Alza has blocked the sidecar's session. For a while the rest go straight to Firecrawl,
-// so the requests of one product do not each spend their time on a sidecar that is going to fail.
+// A 403 that survives the retry means Alza has blocked the sidecar's session. For a while it is left out and Firecrawl goes first
+// among the paid providers, so the requests of one product do not each spend their time on a sidecar that is going to fail.
 // Each block that follows straight after the last one is twice as long, up to the maximum, and one answer from the sidecar resets it.
 const SIDECAR_BLOCK_MS = Number(process.env.SIDECAR_BLOCK_MS ?? 15_000);
 const SIDECAR_BLOCK_MAX_MS = Number(process.env.SIDECAR_BLOCK_MAX_MS ?? 5 * 60_000);
@@ -179,9 +179,7 @@ export function parseCfWorkers(raw: string | undefined): CfWorker[] {
     .map(([url, token], i) => ({ name: i === 0 ? "cfworker" : `cfworker${i + 1}`, url: url!.replace(/\/$/, ""), token: token! }));
 }
 const cfWorkers = parseCfWorkers(process.env.CF_WORKERS);
-// The provider the requests go to first while the sidecar is blocked: the primary worker when there is one, else Firecrawl.
-const fallbackName = (): string | null => (cfWorkers[0] ? cfWorkers[0].name : firecrawl.available() ? "firecrawl" : null);
-const sidecarBlocked = (): boolean => sidecarBlockedUntil > Date.now() && fallbackName() !== null;
+const sidecarBlocked = (): boolean => sidecarBlockedUntil > Date.now() && (cfWorkers.length > 0 || firecrawl.available());
 
 const providers: Provider[] = [
   {
@@ -338,8 +336,9 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
   return outcome;
 }
 
-// The sidecar goes first and alone. Paid providers follow in order, but when one has not answered after hedgeMs the next one
-// starts alongside it and the first usable answer wins, so one slow provider does not eat the whole deadline of an embed.
+// The free providers go first, our own workers in the order they were given, then the sidecar, which is waited for alone. Paid
+// providers follow in order, but when one has not answered after hedgeMs the next one starts alongside it and the first usable
+// answer wins, so one slow provider does not eat the whole deadline of an embed.
 // The ones still running when a winner is in are aborted, so a lost race does not keep a connection (and a paid request) open.
 export async function fetchWith(list: Provider[], url: string, opts: FetchOpts = {}, hedgeMs = HEDGE_MS): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? 25_000;
@@ -351,7 +350,7 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
   const running = new Map<Promise<void>, AbortController>();
 
   const order = list
-    .map((p, i) => ({ p, rank: p.name === "sidecar" ? -2 : p.name === fallbackName() && sidecarBlocked() ? -1.5 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
+    .map((p, i) => ({ p, rank: p.free ? -3 + i / 100 : p.name === "sidecar" ? -2 : p.name === "firecrawl" && sidecarBlocked() ? -1.5 : (opts.prefer?.indexOf(p.name) ?? -1) >= 0 ? -1 : i }))
     .sort((a, b) => a.rank - b.rank || (opts.prefer?.indexOf(a.p.name) ?? 0) - (opts.prefer?.indexOf(b.p.name) ?? 0))
     .map((x) => x.p);
 
