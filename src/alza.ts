@@ -120,9 +120,11 @@ function priceCandidate(v: any, promo = false): PriceCandidate | null {
   };
 }
 
-function computeTier(pricing: any, reference: boolean): Omit<TierResult, "tier"> {
+// priceType 7 is a price of the club or the program itself, 12 is Black Friday, which Alza gives per price group too (B2B pays
+// 2 990 where the club pays 3 489) but with the group type of the ordinary price. Equal to the basic price it is dropped later.
+export function computeTier(pricing: any, reference: boolean): Omit<TierResult, "tier"> {
   const main = pricing.mainPriceTag;
-  if (!reference && main?.priceGroupType === 0 && main.priceType !== 7) {
+  if (!reference && main?.priceGroupType === 0 && main.priceType !== 7 && main.priceType !== 12) {
     return { hidden: true, selected: null, main: null, promos: [] };
   }
   const mainCandidate = priceCandidate(main);

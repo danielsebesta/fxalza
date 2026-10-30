@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blackFridayEntry, withBlackFriday, type BenefitEntry } from "../src/alza.ts";
+import { blackFridayEntry, buildBenefits, computeTier, withBlackFriday, type BenefitEntry } from "../src/alza.ts";
 import { CZ } from "../src/shops.ts";
 
 const BOX = `<div class="price-detail__price-box-wrapper js-price-detail__main-price-box-wrapper" data-testid="price-primary">
@@ -37,4 +37,18 @@ test("other prices are measured from the crossed out price, like Alza does on a 
   assert.deepEqual(out.map((b) => b.kind), ["blackfriday", "alzaplus"]);
   assert.equal(out[1]!.percentShown, 24);
   assert.equal("was" in out[0]!, false);
+});
+
+test("a Black Friday price of one price group (B2B) is kept, and only when it is lower than the basic one", () => {
+  const tag = (price: string, n: number, pct: number) => ({
+    mainPriceTag: { primaryPrice: price, primaryPriceNoCurrency: n, comparePrice: "4 990,-", priceType: 12, priceGroupType: 0, headerText: `BLACK FRIDAY -${pct} %` },
+    promoPrices: [],
+  });
+  const basic = { tier: "Basic", ...computeTier(tag("3 489,-", 3489, 30), true) };
+  const gold = { tier: "Gold", ...computeTier(tag("3 489,-", 3489, 30), false) };
+  const b2b = { tier: "B2B", ...computeTier(tag("2 990,-", 2990, 40), false) };
+  const rows = buildBenefits(new Map([["Basic", basic], ["Gold", gold], ["B2B", b2b]]), CZ).entries.filter((e) => e.kind === "tier");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.label, "B2B");
+  assert.equal(rows[0]!.price, 2990);
 });
