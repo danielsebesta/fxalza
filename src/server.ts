@@ -519,7 +519,7 @@ function shortName(name: string, max = 70): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
 }
 
-function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true, timedOut = false): string {
+function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true, timedOut = false, everyLine = false): string {
   const t = texts(shop.lang);
   const slugged = slugTitle(path);
   const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
@@ -536,7 +536,8 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
   const parts: string[] = [];
   if (p) {
     if (p.priceText && !offers.some((b) => b.kind === "sale" || b.kind === "blackfriday")) parts.push(p.priceText);
-    for (const b of customEmoji ? offers : p.benefits ?? []) parts.push(benefitLine(b));
+    // Discord shows the rest in the embed under it, everywhere else the description is all there is
+    for (const b of customEmoji && !everyLine ? offers : p.benefits ?? []) parts.push(benefitLine(b));
     if (stale) parts.push(t.stale);
     if (p.partial) parts.push(t.partial);
   } else {
@@ -948,7 +949,7 @@ const server = http.createServer(async (req, res) => {
       sendProblem(req, res, shop, isBot, 503, landingTexts(shop.lang).problems.loadTitle, landingTexts(shop.lang).problems.loadBody, { "retry-after": "30" }, false);
       return;
     }
-    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram, timedOut);
+    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram, timedOut, !who.discord);
     res.writeHead(200, EMBED_PAGE_HEADERS);
     res.end(req.method === "HEAD" ? undefined : html);
   } catch (e) {
