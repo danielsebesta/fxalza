@@ -932,7 +932,7 @@ const server = http.createServer(async (req, res) => {
         platform: platformOf(ua),
         shop: shop.code,
         product: parsed.id,
-        ...(data ? { name: shortName(data.name, 80), ...(data.brand ? { brand: data.brand } : {}), benefits: data.benefits?.length ?? 0 } : {}),
+        ...(data ? { name: shortName(data.name, 80), ...(data.brand ? { brand: data.brand } : {}), benefits: data.benefits?.length ?? 0, availability: data.availability, ...(data.benefits?.some((x) => x.kind === "blackfriday") ? { blackfriday: true } : {}) } : {}),
         host: hostOf(req),
         state,
         cache: trace.cache ?? "miss",
