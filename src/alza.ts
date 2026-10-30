@@ -12,7 +12,7 @@ import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 export { stopSidecar } from "./fetcher.ts";
 
 export interface BenefitEntry {
-  kind: "sale" | "coupon" | "alzaplus" | "cashback" | "tradein" | "promo" | "tier";
+  kind: "sale" | "blackfriday" | "coupon" | "alzaplus" | "cashback" | "tradein" | "promo" | "tier";
   label: string;
   price: number;
   priceText: string;
@@ -392,6 +392,7 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ):
 
   const KIND_ORDER: Record<BenefitEntry["kind"], number> = {
     sale: -1,
+    blackfriday: -1,
     coupon: 0,
     alzaplus: 1,
     cashback: 2,
@@ -640,6 +641,49 @@ function cleanDescription(raw: unknown): string | undefined {
   return cut.slice(0, at > 60 ? at : 160).replace(/[\s,;:–*-]+$/, "") + "…";
 }
 
+// Alza prints a Black Friday price in a box of its own ("BLACK FRIDAY -22 %", the crossed out price underneath), and the price API
+// does not always carry the crossed out price for it, so the box on the page is the source.
+export function blackFridayEntry(html: string, shop: Shop): (BenefitEntry & { was?: number }) | null {
+  const box = /<span[^>]*class="[^"]*\bads-pb--black-friday\b[^"]*"[\s\S]*?<\/div>/i.exec(html)?.[0];
+  if (!box) return null;
+  const amount = (re: RegExp): number | null => {
+    const raw = re.exec(box)?.[1];
+    if (!raw) return null;
+    const n = Number(decodeEntities(raw).replace(/[\s ]/g, "").replace(/[,.][-–—]$/, "").replace(",", "."));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const price = amount(/js-price-box__primary-price__value[^>]*>([^<]+)</i);
+  if (price === null) return null;
+  const was = amount(/js-compare-price[^>]*>([^<]+)</i);
+  const shown = Number(/-\s*(\d{1,2})(?:&nbsp;|\s| )*%/.exec(box)?.[1]);
+  return {
+    kind: "blackfriday",
+    label: "Black Friday",
+    price,
+    priceText: formatMoney(shop, price, true),
+    percent: was && was > price ? ((was - price) / was) * 100 : Number.isFinite(shown) ? shown : null,
+    percentShown: Number.isFinite(shown) ? shown : null,
+    ...(was && was > price ? { wasPriceText: formatMoney(shop, was, true), was } : {}),
+  };
+}
+
+// The Black Friday price is the sale of this product, so it takes the place of an ordinary sale line. Alza measures every other
+// price on the page from the crossed out one, so their percent is worked out from it too (the club labels cut it to whole percent).
+export function withBlackFriday(benefits: BenefitEntry[], bf: (BenefitEntry & { was?: number }) | null, shop: Shop): BenefitEntry[] {
+  if (!bf) return benefits;
+  const { was, ...entry } = bf;
+  const rest = benefits
+    .filter((b) => b.kind !== "sale" && b.kind !== "blackfriday")
+    .map((b) => {
+      if (!was || b.kind === "coupon" || !(was > b.price)) return b;
+      const exact = ((was - b.price) / was) * 100;
+      const half = shop.currency === "EUR" ? 0.005 : 0.5;
+      const percentShown = b.kind === "tier" ? Math.floor(exact + 1e-9) : Math.floor(exact + (half * 100) / was + 1e-9);
+      return { ...b, percent: exact, percentShown };
+    });
+  return [entry, ...rest];
+}
+
 export async function fetchProduct(
   id: string,
   path: string,
@@ -648,6 +692,8 @@ export async function fetchProduct(
 ): Promise<ProductData> {
   const t = texts(shop.lang);
   const benefitsStarted = Date.now();
+  let blackFriday: ReturnType<typeof blackFridayEntry> = null;
+  const lateWithBf = onLateBenefits && ((b: BenefitEntry[], complete: boolean) => onLateBenefits(withBlackFriday(b, blackFriday, shop), complete));
   // The id is already known from the link, so the price tiers load while the page itself is still on its way.
   const benefitsPromise: Promise<BenefitsResult> = BENEFITS_ENABLED
     ? fetchBenefits(shop, id).catch((e) => {
@@ -657,6 +703,7 @@ export async function fetchProduct(
     : Promise.resolve({ entries: [], complete: true });
 
   const html = await getHtml(shop, path);
+  blackFriday = blackFridayEntry(html, shop);
   const p = extractProductJsonLd(html);
   if (!p) throw new Error("no Product JSON-LD found on the page");
 
@@ -710,7 +757,7 @@ export async function fetchProduct(
   // The late deliveries run after this function has returned, so a failure in them has nothing to propagate to and is logged here.
   const deliver = (b: BenefitsResult): void => {
     try {
-      onLateBenefits?.(b.entries, b.complete);
+      lateWithBf?.(b.entries, b.complete);
     } catch (e) {
       console.error(`[benefits] ${id} late update not applied: ${e instanceof Error ? e.message : e}`);
     }
@@ -755,7 +802,7 @@ export async function fetchProduct(
     ...(cleanDescription(p.description) ? { description: cleanDescription(p.description)! } : {}),
     image,
     canonicalUrl,
-    benefits,
+    benefits: withBlackFriday(benefits, blackFriday, shop),
     ...(partial ? { partial: true as const } : {}),
     fetchedAt: new Date().toISOString(),
     ...(shop.code === "cz" ? {} : { shop: shop.code }),

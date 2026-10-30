@@ -25,6 +25,7 @@ export function emojiMd(name: string, fallback: string): string {
 
 const KIND: Record<BenefitEntry["kind"], [string, string]> = {
   sale: ["alza_sale", "🏷️"],
+  blackfriday: ["alza_blackfriday", "🖤"],
   coupon: ["alza_coupon", "🎟️"],
   alzaplus: ["alza_plus", "💳"],
   cashback: ["alza_cashback", "💰"],

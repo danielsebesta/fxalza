@@ -451,7 +451,7 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
   const t = texts(shop.lang);
   const titleUrl = carried ? outbound(canonical, carried) : canonical;
   const titleLine = `### **[${mdEsc(p.name)}](${mdUrl(titleUrl)})** (${stateText(p)})`;
-  const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale");
+  const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale" || b.kind === "blackfriday");
   const priceLine =
     p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} ${t.price} **${p.priceText}**` : null;
   const benefitLines = [
@@ -526,7 +526,7 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
   const fallbackTitle = slugged === "Produkt" && productId ? t.productFromAlza(productId) : slugged;
   const canonical = cleanCanonical(p?.canonicalUrl) ?? `https://${shop.host}${path}`;
 
-  const offers = (p?.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "coupon");
+  const offers = (p?.benefits ?? []).filter((b) => b.kind === "sale" || b.kind === "blackfriday" || b.kind === "coupon");
   const cheapest = offers.reduce<BenefitEntry | null>((best, b) => (best === null || b.price < best.price ? b : best), null);
   const titlePrice = p ? (cheapest && (p.price === null || cheapest.price < p.price) ? cheapest.priceText : p.priceText) : null;
   const title = p ? `${shortName(p.name)}${titlePrice ? ` | ${titlePrice}` : ""} (${stateText(p)})` : fallbackTitle;
@@ -535,7 +535,7 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
   const bytes = (t: string): number => Buffer.byteLength(t, "utf8");
   const parts: string[] = [];
   if (p) {
-    if (p.priceText && !offers.some((b) => b.kind === "sale")) parts.push(p.priceText);
+    if (p.priceText && !offers.some((b) => b.kind === "sale" || b.kind === "blackfriday")) parts.push(p.priceText);
     for (const b of customEmoji ? offers : p.benefits ?? []) parts.push(benefitLine(b));
     if (stale) parts.push(t.stale);
     if (p.partial) parts.push(t.partial);
