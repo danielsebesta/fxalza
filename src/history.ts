@@ -79,10 +79,13 @@ export function historyLine(h: PriceHistory, shop: Shop, price: number | null, r
   const change = reference !== null && price !== null ? Math.round(((price - reference) / reference) * 100) : 0;
   // a price that never moved is the lowest as well, and there is nothing to say about that
   const atLowest = lowest !== null && reference !== null && price !== null && price <= lowest.price && price < reference;
-  const notes = [...(change !== 0 ? [`${t.now} ${change < 0 ? "−" : "+"}${Math.abs(change)} %`] : []), ...(atLowest ? [`${t.lowest} ${span}`] : [])];
+  const notes = [...(change !== 0 ? [`${t.now} ${change < 0 ? "-" : "+"}${Math.abs(change)} %`] : []), ...(atLowest ? [`${t.lowest} ${span}`] : [])];
   const parts: string[] = [];
   if (reference !== null) parts.push(`${h.referenceKind === "beforeSale" ? t.beforeSale : t.usual} ${money(reference)}${notes.length > 0 ? ` (${notes.join(", ")})` : ""}`);
   // the usual price comes from a longer window than the series, and can be below everything in it
   if (lowest !== null && !atLowest && (reference === null || lowest.price < reference)) parts.push(`${span} ${t.lowest} ${money(lowest.price)} (${dateText(lowest.date)})`);
-  return parts.length > 0 ? `Hlídač shopů: ${parts.join(", ")}` : null;
+  if (parts.length === 0) return null;
+  const text = parts.join(", ");
+  // On Discord the logo next to the line says whose numbers these are, the plain 📈 elsewhere does not.
+  return rich ? text.charAt(0).toUpperCase() + text.slice(1) : `Hlídač shopů: ${text}`;
 }

@@ -3,11 +3,16 @@ import { test } from "node:test";
 import { readBodyCapped } from "../src/fetcher.ts";
 import { parseKodList } from "../src/kodlist.ts";
 import { clientKey } from "../src/ratelimit.ts";
-import { decodeEntities, discordMd, emphasisMd, httpsUrlOn, plainText } from "../src/sanitize.ts";
+import { decodeEntities, discordMd, emphasisMd, httpsUrlOn, plainDashes, plainText } from "../src/sanitize.ts";
 import { parseSiteDomains } from "../src/shops.ts";
 
 test("a numeric entity outside Unicode is left as written instead of throwing", () => {
   assert.equal(decodeEntities("A &amp; B &#233; &#x1F600; &#99999999999; &#xFFFFFFFF; &bogus;"), "A & B é 😀 &#99999999999; &#xFFFFFFFF; &bogus;");
+});
+
+test("every kind of dash becomes a plain hyphen and nothing else changes", () => {
+  assert.equal(plainDashes("a‐b‑c‒d–e—f―g−h-i"), "a-b-c-d-e-f-g-h-i");
+  assert.equal(plainDashes("6 390 Kč → **5 590 Kč** (+2 %) %E2%80%93"), "6 390 Kč → **5 590 Kč** (+2 %) %E2%80%93");
 });
 
 test("plainText strips tags whether they are literal or entity-encoded", () => {

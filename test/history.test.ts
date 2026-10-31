@@ -49,7 +49,7 @@ test("nothing usable is no history, whatever came back", () => {
 
 test("the line compares the price of the embed with the usual one and names the lowest of the year", () => {
   const line = (price: number | null, over: Partial<PriceHistory> = {}) => historyLine(history(over), CZ, price);
-  assert.equal(line(900), "Hlídač shopů: běžně 1 000 Kč (teď −10 %), za rok nejníž 800 Kč (17. 4. 2026)");
+  assert.equal(line(900), "Hlídač shopů: běžně 1 000 Kč (teď -10 %), za rok nejníž 800 Kč (17. 4. 2026)");
   assert.equal(line(1540), "Hlídač shopů: běžně 1 000 Kč (teď +54 %), za rok nejníž 800 Kč (17. 4. 2026)");
   assert.equal(line(1000), "Hlídač shopů: běžně 1 000 Kč, za rok nejníž 800 Kč (17. 4. 2026)");
   // a difference that rounds to nothing is not one
@@ -58,8 +58,8 @@ test("the line compares the price of the embed with the usual one and names the 
 });
 
 test("a price at the lowest of the year says so, unless it never moved", () => {
-  assert.equal(historyLine(history(), CZ, 800), "Hlídač shopů: běžně 1 000 Kč (teď −20 %, nejníž za rok)");
-  assert.equal(historyLine(history(), CZ, 349), "Hlídač shopů: běžně 1 000 Kč (teď −65 %, nejníž za rok)");
+  assert.equal(historyLine(history(), CZ, 800), "Hlídač shopů: běžně 1 000 Kč (teď -20 %, nejníž za rok)");
+  assert.equal(historyLine(history(), CZ, 349), "Hlídač shopů: běžně 1 000 Kč (teď -65 %, nejníž za rok)");
   assert.equal(historyLine(history({ reference: 499, lowest: { price: 499, date: "2026-10-31" } }), CZ, 499), "Hlídač shopů: běžně 499 Kč");
 });
 
@@ -70,17 +70,19 @@ test("a lowest price that adds nothing to the usual one is left out", () => {
 });
 
 test("a sale is measured against the price before it, a short series names its length", () => {
-  assert.equal(historyLine(history({ referenceKind: "beforeSale", reference: 34990, lowest: { price: 31990, date: "2026-10-31" } }), CZ, 31990), "Hlídač shopů: před slevou 34 990 Kč (teď −9 %, nejníž za rok)");
-  assert.equal(historyLine(history({ days: 72, lowest: { price: 800, date: "2026-09-21" } }), CZ, 900), "Hlídač shopů: běžně 1 000 Kč (teď −10 %), za 72 dní nejníž 800 Kč (21. 9. 2026)");
+  assert.equal(historyLine(history({ referenceKind: "beforeSale", reference: 34990, lowest: { price: 31990, date: "2026-10-31" } }), CZ, 31990), "Hlídač shopů: před slevou 34 990 Kč (teď -9 %, nejníž za rok)");
+  assert.equal(historyLine(history({ days: 72, lowest: { price: 800, date: "2026-09-21" } }), CZ, 900), "Hlídač shopů: běžně 1 000 Kč (teď -10 %), za 72 dní nejníž 800 Kč (21. 9. 2026)");
   assert.equal(historyLine(history({ reference: null }), CZ, 900), "Hlídač shopů: za rok nejníž 800 Kč (17. 4. 2026)");
-  assert.equal(historyLine(history({ days: 25, lowest: null }), CZ, 349), "Hlídač shopů: běžně 1 000 Kč (teď −65 %)");
+  assert.equal(historyLine(history({ days: 25, lowest: null }), CZ, 349), "Hlídač shopů: běžně 1 000 Kč (teď -65 %)");
   assert.equal(historyLine(history({ reference: null, lowest: null }), CZ, 349), null);
 });
 
-test("the line is in the language and the currency of the shop, in bold for Discord", () => {
+test("the line is in the language and the currency of the shop, in bold and with only the logo for a name on Discord", () => {
   assert.equal(historyLine(history({ reference: 103, lowest: { price: 88.5, date: "2026-07-20" } }), SHOPS.sk, 112), "Hlídač shopů: bežne 103 € (teraz +9 %), za rok najnižšie 88,50 € (20. 7. 2026)");
-  assert.equal(historyLine(history({ referenceKind: "beforeSale", lowest: null }), SHOPS.sk, 900), "Hlídač shopů: pred zľavou 1 000 € (teraz −10 %)");
-  assert.equal(historyLine(history(), CZ, 900, true), "Hlídač shopů: běžně **1 000 Kč** (teď −10 %), za rok nejníž **800 Kč** (17. 4. 2026)");
+  assert.equal(historyLine(history({ referenceKind: "beforeSale", lowest: null }), SHOPS.sk, 900), "Hlídač shopů: pred zľavou 1 000 € (teraz -10 %)");
+  assert.equal(historyLine(history(), CZ, 900, true), "Běžně **1 000 Kč** (teď -10 %), za rok nejníž **800 Kč** (17. 4. 2026)");
+  assert.equal(historyLine(history({ reference: null }), CZ, 900, true), "Za rok nejníž **800 Kč** (17. 4. 2026)");
+  assert.equal(historyLine(history({ reference: null, lowest: null }), CZ, 900, true), null);
   // no text for a shop Hlídač shopů does not follow
   assert.equal(historyLine(history(), SHOPS.hu, 900), null);
 });

@@ -22,7 +22,6 @@ let server: ChildProcess | undefined;
 const product = (id: string, host: string, extra: Record<string, unknown> = {}) => ({
   at: Date.now(),
   data: {
-    ...extra,
     id,
     name: "Věc",
     price: 1000,
@@ -36,6 +35,7 @@ const product = (id: string, host: string, extra: Record<string, unknown> = {}) 
     canonicalUrl: `https://${host}/vec-d${id}.htm`,
     benefits: [],
     fetchedAt: new Date().toISOString(),
+    ...extra,
   },
 });
 
@@ -55,7 +55,7 @@ before(async () => {
   port = await freePort();
   const cache = path.join(dir, "cache.json");
   const history = { reference: 1250, referenceKind: "usual", lowest: { price: 800, date: "2026-04-17" }, days: 365 };
-  fs.writeFileSync(cache, JSON.stringify({ "123": product("123", "www.alza.cz"), "sk:123": product("123", "www.alza.sk"), "200": product("200", "www.alza.cz", { history }) }));
+  fs.writeFileSync(cache, JSON.stringify({ "123": product("123", "www.alza.cz"), "sk:123": product("123", "www.alza.sk"), "200": product("200", "www.alza.cz", { history }), "201": product("201", "www.alza.cz", { history, description: "Popis – s pomlčkou — a −1", benefits: [{ kind: "sale", label: "Sleva", price: 900, priceText: "900 Kč", wasPriceText: "1 000 Kč", percent: 10 }] }) }));
   const listing = path.join(here, "fixtures", "kod-list-raw.html");
   const stub = path.join(dir, "stub-fetch.mjs");
   fs.writeFileSync(
@@ -125,18 +125,43 @@ function component(html: string): { text: string; title: string; button: string;
 
 const description = (html: string): string => /<meta property="og:description" content="([^"]*)">/.exec(html)![1]!;
 
-test("Discord gets the line of Hlídač shopů in the card, with the price measured against the usual one", async () => {
+// the card from the top down: 9 the section with the picture, 10 a text, 14 a dividing line, 1 the buttons
+function layout(html: string): { type: number; content?: string }[] {
+  const raw = /<script id="discord:component-embed" type="application\/json">(.*?)<\/script>/s.exec(html)![1]!;
+  return (JSON.parse(raw) as { component: { components: { type: number; content?: string }[] } }).component.components;
+}
+
+test("Discord gets the prices in a field of their own and the line of Hlídač shopů behind a dividing line", async () => {
   const { status, body } = await get("fxalza.cz", "/vec-d200.htm", DISCORD);
   assert.equal(status, 200);
-  const { text } = component(body);
-  assert.ok(text.includes("Hlídač shopů: běžně **1 250 Kč** (teď −20 %), za rok nejníž **800 Kč** (17. 4. 2026)"), text);
+  const parts = layout(body);
+  assert.deepEqual(parts.map((p) => p.type), [9, 10, 14, 10, 1]);
+  assert.ok(!component(body).text.includes("1 000 Kč"), "the price is not next to the picture");
+  assert.ok(parts[1]!.content!.startsWith("- ") && parts[1]!.content!.includes("**1 000 Kč**"), parts[1]!.content);
+  assert.ok(parts[3]!.content!.endsWith(" Běžně **1 250 Kč** (teď -20 %), za rok nejníž **800 Kč** (17. 4. 2026)"), parts[3]!.content);
+  assert.ok(!parts[3]!.content!.includes("Hlídač shopů"), "only the logo names the source");
+  assert.ok(parts[3]!.content!.startsWith(">>> "), parts[3]!.content);
   // the card is where it belongs, the description keeps its room for what Discord shows above it
   assert.ok(!description(body).includes("Hlídač shopů"));
 });
 
+test("a preview writes every dash as a plain hyphen, also the ones in the texts of Alza", async () => {
+  const dashes = /[‐-―−]/;
+  const discord = (await get("fxalza.cz", "/vec-d201.htm", DISCORD)).body;
+  assert.ok(!dashes.test(discord));
+  assert.ok(component(discord).text.includes("Popis - s pomlčkou - a -1"), component(discord).text);
+  assert.ok(layout(discord)[1]!.content!.includes("**900 Kč** (-10 %)"), layout(discord)[1]!.content);
+  assert.ok(!dashes.test((await get("fxalza.cz", "/vec-d201.htm", "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)")).body));
+  assert.ok(!dashes.test((await get("fxalza.cz", "/kod/ABC123;DEF456", DISCORD)).body));
+});
+
+test("without a history the prices go straight on to the line and the buttons", async () => {
+  assert.deepEqual(layout((await get("fxalza.cz", "/vec-d123.htm", DISCORD)).body).map((p) => p.type), [9, 10, 14, 1]);
+});
+
 test("everywhere else the line goes into the description, without the markdown", async () => {
   const { body } = await get("fxalza.cz", "/vec-d200.htm", "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)");
-  assert.ok(description(body).includes("📈 Hlídač shopů: běžně 1 250 Kč (teď −20 %), za rok nejníž 800 Kč (17. 4. 2026)"), description(body));
+  assert.ok(description(body).includes("📈 Hlídač shopů: běžně 1 250 Kč (teď -20 %), za rok nejníž 800 Kč (17. 4. 2026)"), description(body));
 });
 
 test("a product without a history has no such line, and the json answer passes the summary on", async () => {

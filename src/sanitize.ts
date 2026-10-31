@@ -39,6 +39,12 @@ export function plainText(raw: string): string {
   return tidyText(withoutTags(raw).replace(/\*+/g, ""));
 }
 
+// A preview writes every dash as the plain hyphen, also the en dashes that arrive in the texts of Alza. Addresses are
+// percent-encoded by then, so a whole page can go through this.
+export function plainDashes(t: string): string {
+  return t.replace(/[‐-―−]/g, "-");
+}
+
 // Private-use stand-ins so markdown escaping does not touch emphasis we intentionally keep for Discord.
 const BOLD = "\uE000";
 const ITALIC = "\uE001";

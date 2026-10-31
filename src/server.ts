@@ -15,7 +15,7 @@ import { ALL_SHOPS, CZ, SITE_APEX, partnerOfHost, shopByTld, shopOfHost, siteHos
 import { DEMO_CSP, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, demoHtml, landingCsp, landingHtml, problemHtml, robotsTxt, sitemapXml } from "./landing.ts";
 import { landingTexts } from "./landing-i18n.ts";
 import { allowFetch, anonymizedIp, identify, rateTier, retryAfterSeconds, type Requester } from "./ratelimit.ts";
-import { discordMd, plainText } from "./sanitize.ts";
+import { discordMd, plainDashes, plainText } from "./sanitize.ts";
 import { createHash } from "node:crypto";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -280,8 +280,8 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
     const price = i.priceText ? (rich ? ` **${i.priceText}**` : ` ${i.priceText}`) : "";
     const was = i.wasText ? (rich ? ` ~~${i.wasText}~~` : ` (bylo ${i.wasText})`) : "";
     const name = shortName(i.name, 60);
-    if (!rich) return `${name} –${price}${was}`;
-    return `[${mdEsc(name)}](${mdUrl(outbound(i.url, carried))}) —${price}${was}`;
+    if (!rich) return `${name} -${price}${was}`;
+    return `[${mdEsc(name)}](${mdUrl(outbound(i.url, carried))}) -${price}${was}`;
   };
   const img = list.items.find((i) => i.image)?.image ?? null;
   const imgUrl = img ? `${img}?width=${IMG_W}&height=${IMG_W}` : null;
@@ -445,7 +445,7 @@ function buttonUrl(url: string, short: string): string {
 
 function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
   const shownPercent = e.percentShown ?? (e.percent === null ? null : Math.round(e.percent));
-  const pct = shownPercent !== null && shownPercent > 0 ? ` (−${shownPercent} %)` : "";
+  const pct = shownPercent !== null && shownPercent > 0 ? ` (-${shownPercent} %)` : "";
   const was = e.wasPriceText ? `${e.wasPriceText} → ` : "";
   const name = e.note ? `${e.label} + ${e.note}` : e.label;
   if (!rich) return `${benefitEmoji(e, custom)} ${name} ${was}${e.priceText}${pct}`;
@@ -470,10 +470,10 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
   const priceLine =
     p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} ${t.price} **${p.priceText}**` : null;
   const history = p.history ? historyLine(p.history, shop, p.price, true) : null;
+  const historyText = history ? `>>> ${customEmoji ? emojiMd("hlidac_shopu", "📈") : "📈"} ${history}` : null;
   const benefitLines = [
     ...(priceLine ? [priceLine] : []),
     ...(p.benefits ?? []).map((b) => benefitLine(b, true, customEmoji)),
-    ...(history ? [`${customEmoji ? emojiMd("hlidac_shopu", "📈") : "📈"} ${history}`] : []),
     ...(p.partial ? [`-# ${t.partial}`] : []),
   ];
   const humanUrl = outbound(canonical, carried);
@@ -483,13 +483,8 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
 
   const desc = p.description ? discordMd(p.description) : "";
 
-  const build = (lines: string[], withThumb: boolean, withDesc = true): string => {
-    const parts = [`-# ${siteName(shop, partner)}`, titleLine];
-    if (withDesc && desc) {
-      parts.push(desc);
-      if (lines.length > 0) parts.push("");
-    }
-    const summary = [...parts, ...lines.map((l) => `- ${l}`)].join("\n");
+  const build = (lines: string[], withThumb: boolean, withDesc = true, withHistory = true): string => {
+    const summary = [`-# ${siteName(shop, partner)}`, titleLine, ...(withDesc && desc ? [desc] : [])].join("\n");
     const components: unknown[] = [];
     if (withThumb && img) {
       components.push({
@@ -500,7 +495,11 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
     } else {
       components.push({ type: 10, content: summary });
     }
+    // Discord refuses an empty text, so a product with no price has no field for it
+    if (lines.length > 0) components.push({ type: 10, content: lines.map((l) => `- ${l}`).join("\n") });
     components.push({ type: 14 });
+    // under the line, right above its button
+    if (withHistory && historyText) components.push({ type: 10, content: historyText });
     components.push({
       type: 1,
       components: [
@@ -521,13 +520,16 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
   };
 
   const fits = (json: string): boolean => Buffer.byteLength(json, "utf8") <= 2900;
+  // What does not fit goes in this order: the description, then the line of Hlídač shopů, then the prices from the last one up.
   for (let n = benefitLines.length; n >= 0; n--) {
-    for (const withDesc of [true, false]) {
-      const json = build(benefitLines.slice(0, n), true, withDesc);
-      if (fits(json)) return json;
+    for (const withHistory of [true, false]) {
+      for (const withDesc of [true, false]) {
+        const json = build(benefitLines.slice(0, n), true, withDesc, withHistory);
+        if (fits(json)) return json;
+      }
     }
   }
-  const lean = build([], false);
+  const lean = build([], false, true, false);
   return fits(lean) ? lean : null;
 }
 
@@ -871,7 +873,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       res.writeHead(200, EMBED_PAGE_HEADERS);
-      res.end(req.method === "HEAD" ? undefined : kodHtml(list, pathname, carried, !who.telegram, activePartner()));
+      res.end(req.method === "HEAD" ? undefined : plainDashes(kodHtml(list, pathname, carried, !who.telegram, activePartner())));
       return;
     }
     if (!parsed && isBot) parsed = await withDeadline(resolveSlug(shop, pathname, who), PAGE_DEADLINE_MS, null);
@@ -982,7 +984,7 @@ const server = http.createServer(async (req, res) => {
       sendProblem(req, res, shop, isBot, 503, landingTexts(shop.lang).problems.loadTitle, landingTexts(shop.lang).problems.loadBody, { "retry-after": "30" }, false);
       return;
     }
-    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams, affiliate()), missing, !who.telegram, timedOut, !who.discord, activePartner());
+    const html = plainDashes(embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams, affiliate()), missing, !who.telegram, timedOut, !who.discord, activePartner()));
     res.writeHead(200, EMBED_PAGE_HEADERS);
     res.end(req.method === "HEAD" ? undefined : html);
   } catch (e) {
