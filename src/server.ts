@@ -9,6 +9,7 @@ import { OverloadedError } from "./sidecar.ts";
 import { sidecarStats } from "./fetcher.ts";
 import { cacheSize, flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
+import { printStartupReport } from "./startup.ts";
 import { historyLine } from "./history.ts";
 import { texts } from "./i18n.ts";
 import { ALL_SHOPS, CZ, SITE_APEX, partnerOfHost, shopByTld, shopOfHost, siteHost, siteUrl, type Partner, type Shop } from "./shops.ts";
@@ -1067,7 +1068,10 @@ server.on("error", (e: NodeJS.ErrnoException) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[server] fxalza listening on http://${HOST}:${PORT}`);
-  void warmUp();
+  // the report follows the warm-up, by then the sidecar workers are up and the first answers of Alza are in
+  void warmUp()
+    .then(() => printStartupReport())
+    .catch((e) => console.warn(`[startup] report failed: ${e instanceof Error ? e.message : e}`));
 });
 
 // Stop taking requests, let the ones being answered finish (SHUTDOWN_GRACE_MS at most), then write the cache and leave.
