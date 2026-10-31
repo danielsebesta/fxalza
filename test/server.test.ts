@@ -19,9 +19,10 @@ let dir = "";
 let port = 0;
 let server: ChildProcess | undefined;
 
-const product = (id: string, host: string) => ({
+const product = (id: string, host: string, extra: Record<string, unknown> = {}) => ({
   at: Date.now(),
   data: {
+    ...extra,
     id,
     name: "Věc",
     price: 1000,
@@ -53,7 +54,8 @@ before(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "fxalza-server-"));
   port = await freePort();
   const cache = path.join(dir, "cache.json");
-  fs.writeFileSync(cache, JSON.stringify({ "123": product("123", "www.alza.cz"), "sk:123": product("123", "www.alza.sk") }));
+  const history = { reference: 1250, referenceKind: "usual", lowest: { price: 800, date: "2026-04-17" }, days: 365 };
+  fs.writeFileSync(cache, JSON.stringify({ "123": product("123", "www.alza.cz"), "sk:123": product("123", "www.alza.sk"), "200": product("200", "www.alza.cz", { history }) }));
   const listing = path.join(here, "fixtures", "kod-list-raw.html");
   const stub = path.join(dir, "stub-fetch.mjs");
   fs.writeFileSync(
@@ -120,6 +122,30 @@ function component(html: string): { text: string; title: string; button: string;
   const buttons = parts.find((c) => c.type === 1)!.components!;
   return { text, title: /\]\((https:[^)]*)\)/.exec(text)![1]!, button: buttons[0]!.url!, history: buttons.find((b) => b.label === "Hlídač shopů")?.url };
 }
+
+const description = (html: string): string => /<meta property="og:description" content="([^"]*)">/.exec(html)![1]!;
+
+test("Discord gets the line of Hlídač shopů in the card, with the price measured against the usual one", async () => {
+  const { status, body } = await get("fxalza.cz", "/vec-d200.htm", DISCORD);
+  assert.equal(status, 200);
+  const { text } = component(body);
+  assert.ok(text.includes("Hlídač shopů: běžně **1 250 Kč** (teď −20 %), za rok nejníž **800 Kč** (17. 4. 2026)"), text);
+  // the card is where it belongs, the description keeps its room for what Discord shows above it
+  assert.ok(!description(body).includes("Hlídač shopů"));
+});
+
+test("everywhere else the line goes into the description, without the markdown", async () => {
+  const { body } = await get("fxalza.cz", "/vec-d200.htm", "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)");
+  assert.ok(description(body).includes("📈 Hlídač shopů: běžně 1 250 Kč (teď −20 %), za rok nejníž 800 Kč (17. 4. 2026)"), description(body));
+});
+
+test("a product without a history has no such line, and the json answer passes the summary on", async () => {
+  const { body } = await get("fxalza.cz", "/vec-d123.htm", DISCORD);
+  assert.ok(!component(body).text.includes("Hlídač shopů"));
+  assert.ok(!description(body).includes("Hlídač shopů"));
+  const json = JSON.parse((await get("fxalza.cz", "/vec-d200.htm?format=json")).body) as { history?: { reference: number } };
+  assert.equal(json.history?.reference, 1250);
+});
 
 test("the partner is recognised by its subdomain, also with a www, and is not a shop of its own", () => {
   assert.equal(partnerOfHost(GB, "fxalza.cz")?.query, CODE);

@@ -77,7 +77,7 @@ const cs: LandingTexts = {
   creditFxembed: "(MIT) - inspirace a rozpoznávání botů",
   creditExtension: "- inspirace pro celý projekt a jeho logiku, hlavně klubové ceny a kupóny",
   creditMcp: "(MCP server pro Alzu) - inspirace v tom, jak s Alzou komunikovat, a nápad s <code>utm_source</code>",
-  creditHistory: "- historie cen na tlačítku v náhledu",
+  creditHistory: "- historie cen v náhledu i na tlačítku",
   madeBy: "Vytvořil",
   machineTranslation: (original) => `Původní web je ${original}. Tahle verze byla přeložena strojově pomocí AI.`,
   problems: {
@@ -126,7 +126,7 @@ const sk: LandingTexts = {
   creditFxembed: "(MIT) - inšpirácia a rozpoznávanie botov",
   creditExtension: "- inšpirácia pre celý projekt a jeho logiku, hlavne klubové ceny a kupóny",
   creditMcp: "(MCP server pre Alzu) - inšpirácia v tom, ako s Alzou komunikovať, a nápad s <code>utm_source</code>",
-  creditHistory: "- história cien na tlačidle v náhľade",
+  creditHistory: "- história cien v náhľade aj na tlačidle",
   madeBy: "Vytvoril",
   machineTranslation: (original) => `Pôvodná stránka je ${original} (po česky). Táto verzia bola preložená strojovo pomocou AI.`,
   problems: {
@@ -175,7 +175,7 @@ const hu: LandingTexts = {
   creditFxembed: "(MIT) - ihlet és a botok felismerése",
   creditExtension: "- ihlet az egész projekthez és a logikájához, főleg a klubárakhoz és a kuponokhoz",
   creditMcp: "(MCP-szerver az Alzához) - ihlet ahhoz, hogyan érdemes az Alzával kommunikálni, és az <code>utm_source</code> ötlete",
-  creditHistory: "- árelőzmények a gombon az előnézetben",
+  creditHistory: "- árelőzmények az előnézetben és a gombon",
   madeBy: "Készítette",
   machineTranslation: (original) => `Az eredeti oldal a ${original} (csehül). Ez a verzió gépi fordítással, mesterséges intelligencia segítségével készült.`,
   problems: {
@@ -224,7 +224,7 @@ const de: LandingTexts = {
   creditFxembed: "(MIT) - Inspiration und Erkennung von Bots",
   creditExtension: "- Inspiration für das ganze Projekt und seine Logik, vor allem Clubpreise und Gutscheine",
   creditMcp: "(MCP-Server für Alza) - Inspiration dafür, wie man mit Alza kommuniziert, und die Idee mit <code>utm_source</code>",
-  creditHistory: "- Preisverlauf auf der Schaltfläche in der Vorschau",
+  creditHistory: "- Preisverlauf in der Vorschau und auf der Schaltfläche",
   madeBy: "Erstellt von",
   machineTranslation: (original) => `Die Originalseite ist ${original} (auf Tschechisch). Diese Version wurde maschinell mit Hilfe von KI übersetzt.`,
   problems: {

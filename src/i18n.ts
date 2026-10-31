@@ -26,6 +26,8 @@ export interface Texts {
   missing: string;
   failed: string;
   disclaimer: string;
+  // only for the languages of the shops Hlídač shopů follows
+  history?: { usual: string; beforeSale: string; now: string; lowest: string; year: string; days: (n: number) => string };
 }
 
 const cs: Texts = {
@@ -68,6 +70,7 @@ const cs: Texts = {
   missing: "Tenhle produkt na Alze už nenajdeme, odkaz je nejspíš neplatný.",
   failed: "Produkt se nepodařilo načíst, zkus odkaz otevřít přímo na Alze.",
   disclaimer: "Neoficiální nástroj, s Alza.cz a.s. nijak nesouvisí.\n„Alza“ a „Alza.cz“ jsou ochranné známky společnosti Alza.cz a.s.",
+  history: { usual: "běžně", beforeSale: "před slevou", now: "teď", lowest: "nejníž", year: "za rok", days: (n) => `za ${n} dní` },
 };
 
 const sk: Texts = {
@@ -110,6 +113,7 @@ const sk: Texts = {
   missing: "Tento produkt na Alze už nenájdeme, odkaz je pravdepodobne neplatný.",
   failed: "Produkt sa nepodarilo načítať, skús odkaz otvoriť priamo na Alze.",
   disclaimer: "Neoficiálny nástroj, s Alza.cz a.s. nijako nesúvisí.\n„Alza“ a „Alza.sk“ sú ochranné známky spoločnosti Alza.cz a.s.",
+  history: { usual: "bežne", beforeSale: "pred zľavou", now: "teraz", lowest: "najnižšie", year: "za rok", days: (n) => `za ${n} dní` },
 };
 
 const hu: Texts = {

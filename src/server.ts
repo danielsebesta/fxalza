@@ -9,6 +9,7 @@ import { OverloadedError } from "./sidecar.ts";
 import { sidecarStats } from "./fetcher.ts";
 import { cacheSize, flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
+import { historyLine } from "./history.ts";
 import { texts } from "./i18n.ts";
 import { ALL_SHOPS, CZ, SITE_APEX, partnerOfHost, shopByTld, shopOfHost, siteHost, siteUrl, type Partner, type Shop } from "./shops.ts";
 import { DEMO_CSP, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, demoHtml, landingCsp, landingHtml, problemHtml, robotsTxt, sitemapXml } from "./landing.ts";
@@ -468,9 +469,11 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
   const hasSale = (p.benefits ?? []).some((b) => b.kind === "sale" || b.kind === "blackfriday");
   const priceLine =
     p.priceText && !hasSale ? `${customEmoji ? emojiMd("alza_price", "🏷️") : "🏷️"} ${t.price} **${p.priceText}**` : null;
+  const history = p.history ? historyLine(p.history, shop, p.price, true) : null;
   const benefitLines = [
     ...(priceLine ? [priceLine] : []),
     ...(p.benefits ?? []).map((b) => benefitLine(b, true, customEmoji)),
+    ...(history ? [`${customEmoji ? emojiMd("hlidac_shopu", "📈") : "📈"} ${history}`] : []),
     ...(p.partial ? [`-# ${t.partial}`] : []),
   ];
   const humanUrl = outbound(canonical, carried);
@@ -553,6 +556,8 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
     if (p.priceText && !offers.some((b) => b.kind === "sale" || b.kind === "blackfriday")) parts.push(p.priceText);
     // Discord shows the rest in the embed under it, everywhere else the description is all there is
     for (const b of customEmoji && !everyLine ? offers : p.benefits ?? []) parts.push(benefitLine(b));
+    const history = p.history && (!customEmoji || everyLine) ? historyLine(p.history, shop, p.price) : null;
+    if (history) parts.push(`📈 ${history}`);
     if (stale) parts.push(t.stale);
     if (p.partial) parts.push(t.partial);
   } else {

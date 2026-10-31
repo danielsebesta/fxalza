@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { track } from "./analytics.ts";
 import { fetchUrl } from "./fetcher.ts";
+import { fetchPriceHistory, type PriceHistory } from "./history.ts";
 import { texts } from "./i18n.ts";
 import { kodCodes, parseKodList, type KodItem, type KodList } from "./kodlist.ts";
 import { parseProductPath, withoutLanguagePrefix, type Parsed } from "./parse.ts";
@@ -43,6 +44,7 @@ export interface ProductData {
   fetchedAt: string;
   // the shop the product was read from, a missing value means Alza.cz
   shop?: ShopCode;
+  history?: PriceHistory;
 }
 
 const BENEFITS_ENABLED = process.env.BENEFITS !== "0";
@@ -706,6 +708,8 @@ export async function fetchProduct(
         return { entries: [], complete: false };
       })
     : Promise.resolve({ entries: [], complete: true });
+  // never rejects, so it is safe to leave behind when the page below fails
+  const historyPromise = fetchPriceHistory(shop, id);
 
   const html = await getHtml(shop, path);
   blackFriday = blackFridayEntry(html, shop);
@@ -793,6 +797,8 @@ export async function fetchProduct(
       .catch(lateFailed);
   }
 
+  const history = await historyPromise;
+
   return {
     id,
     name: decodeEntities(String(p.name ?? slugTitle(path))),
@@ -811,5 +817,6 @@ export async function fetchProduct(
     ...(partial ? { partial: true as const } : {}),
     fetchedAt: new Date().toISOString(),
     ...(shop.code === "cz" ? {} : { shop: shop.code }),
+    ...(history ? { history } : {}),
   };
 }
