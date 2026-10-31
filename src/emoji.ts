@@ -11,11 +11,22 @@ function loadIds(): Record<string, string> {
   }
 }
 
+// the names in the message are only two characters, Discord looks the emoji up by the id alone
+const NAMES_FILE = new URL("../assets/emoji/names.json", import.meta.url);
+function loadNames(): Record<string, string> {
+  try {
+    return JSON.parse(readFileSync(NAMES_FILE, "utf8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
 const ids = loadIds();
+const names = loadNames();
 
 export function emojiRef(name: string): { name: string; id: string } | null {
   const id = ids[name];
-  return id ? { name, id } : null;
+  return id ? { name: names[name] ?? name, id } : null;
 }
 
 export function emojiMd(name: string, fallback: string): string {
