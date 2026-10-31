@@ -71,6 +71,21 @@ export function shopOfHost(host: string, apex: string = SITE_APEX, domains: Site
   );
 }
 
+// A partner's subdomain serves one shop with the partner's affiliate code on every link to that shop (gb.fxalza.cz is Alza.cz for GeekBoy).
+export interface Partner {
+  code: string;
+  shop: ShopCode;
+  query: string;
+  // said next to the name of the shop at the top of a preview
+  label: string;
+}
+
+export const PARTNERS: Partner[] = [{ code: "gb", shop: "cz", query: "idp=8435&banner_id=34308", label: "GeekBoy affiliate" }];
+
+export function partnerOfHost(host: string, apex: string = SITE_APEX): Partner | null {
+  return PARTNERS.find((p) => host === `${p.code}.${apex}` || host === `www.${p.code}.${apex}`) ?? null;
+}
+
 // Whole crowns and forints, euros with cents. `precise` keeps the haléře of a Czech price, as the price lists print them.
 const formatters = new Map<string, Intl.NumberFormat>();
 

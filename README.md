@@ -26,6 +26,10 @@ Náhled je ve slovenštině, maďarštině nebo němčině, ceny jsou v eurech (
 
 Úvodní stránka i chybové stránky jsou v jazyce obchodu (cs, sk, hu, de). Adresa, na které obchod žije, je jedno místo v nastavení: kdyby měl obchod vlastní doménu, stačí `SHOP_DOMAINS=sk=fxalza.sk,hu=fxalza.hu`. Všude, kde stránka píše vlastní adresu (odkazy, canonical, převodník), se pak použije ta doména a subdoména dál funguje vedle ní.
 
+## Subdomény s affiliate kódem
+
+`gb.fxalza.cz` funguje stejně jako `fxalza.cz`, jen má každý odkaz na Alza.cz GeekBoy affiliate kód (`idp=8435&banner_id=34308`): tlačítko a titulek v náhledu, přesměrování i výpisy zboží. V záhlaví náhledu pak stojí `Alza.cz (GeekBoy affiliate)`. Adresa bez produktu, třeba samotné `gb.fxalza.cz`, přesměruje na Alza.cz, také s kódem. Další partner je jeden řádek v `PARTNERS` v `src/shops.ts`.
+
 ## Poděkování
 
 - [FxEmbed](https://github.com/FxEmbed/FxEmbed) (MIT) - inspirace a rozpoznávání botů

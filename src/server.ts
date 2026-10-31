@@ -10,7 +10,7 @@ import { sidecarStats } from "./fetcher.ts";
 import { cacheSize, flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { texts } from "./i18n.ts";
-import { ALL_SHOPS, CZ, SITE_APEX, shopByTld, shopOfHost, siteHost, siteUrl, type Shop } from "./shops.ts";
+import { ALL_SHOPS, CZ, SITE_APEX, partnerOfHost, shopByTld, shopOfHost, siteHost, siteUrl, type Partner, type Shop } from "./shops.ts";
 import { DEMO_CSP, FAVICON_SVG, LANDING_CSP, LLMS_TXT, PUBLIC_URL, demoHtml, landingCsp, landingHtml, problemHtml, robotsTxt, sitemapXml } from "./landing.ts";
 import { landingTexts } from "./landing-i18n.ts";
 import { allowFetch, anonymizedIp, identify, rateTier, retryAfterSeconds, type Requester } from "./ratelimit.ts";
@@ -267,9 +267,9 @@ async function getKodList(pathname: string, who: Requester): Promise<KodList | n
   return p;
 }
 
-function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: boolean): string {
+function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: boolean, partner: Partner | null = null): string {
   const listUrl = outbound(`https://www.alza.cz${pathname}`, carried);
-  const openUrl = buttonUrl(listUrl, `https://www.alza.cz${pathname}`);
+  const openUrl = buttonUrl(listUrl, outbound(`https://www.alza.cz${pathname}`, partner?.query ?? ""));
   const totalText = `${new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 }).format(list.total).replace(/\u00a0/g, " ")} Kč`;
   const count = list.items.length;
   const noun = count === 1 ? "položka" : count < 5 ? "položky" : "položek";
@@ -298,7 +298,7 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
     const shown = list.items.slice(0, n);
     const rest = count - n;
     const content = [
-      "-# Alza.cz",
+      `-# ${siteName(CZ, partner)}`,
       `### **Výpis zboží** (${count} ${noun}, celkem **${totalText}**)`,
       ...shown.map((i) => `- ${line(i, true)}`),
       ...(rest > 0 ? [`-# … a ${rest} dalších`] : []),
@@ -334,7 +334,7 @@ function kodHtml(list: KodList, pathname: string, carried: string, customEmoji: 
     `<meta charset="utf-8">`,
     `<title>${esc(heading)} | Alza.cz</title>`,
     `<meta property="og:type" content="website">`,
-    `<meta property="og:site_name" content="Alza.cz">`,
+    `<meta property="og:site_name" content="${siteName(CZ, partner)}">`,
     `<meta property="og:title" content="${esc(heading)}">`,
     `<meta name="description" content="${esc(desc)}">`,
     `<meta property="og:description" content="${esc(desc)}">`,
@@ -400,16 +400,30 @@ function withUtm(url: string): string {
 
 const CONTROL_PARAMS = new Set(["format", "v"]);
 
-function carriedQuery(params: URLSearchParams): string {
+// A partner's code goes first and whatever the link already says about the same parameters is dropped, in any spelling (IDP=1),
+// so that the code cannot be replaced from the address.
+function carriedQuery(params: URLSearchParams, affiliate = ""): string {
+  const own = new Set(new URLSearchParams(affiliate).keys());
   const kept = new URLSearchParams();
-  for (const [key, value] of params) if (!CONTROL_PARAMS.has(key)) kept.append(key, value);
+  for (const [key, value] of params) if (!CONTROL_PARAMS.has(key) && !own.has(key.toLowerCase())) kept.append(key, value);
   const query = kept.toString();
-  return query.length > 0 && query.length <= 512 ? query : "";
+  const carried = query.length > 0 && query.length <= 512 ? query : "";
+  return affiliate && carried ? `${affiliate}&${carried}` : affiliate || carried;
 }
 
 function outbound(url: string, carried: string): string {
   if (!carried) return withUtm(url);
   return url + (url.includes("?") ? "&" : "?") + carried;
+}
+
+// The address a page names as its own stays bare, unless the partner's code has to be on it.
+function withAffiliate(url: string, affiliate: string): string {
+  return affiliate ? outbound(url, affiliate) : url;
+}
+
+// The name of the shop at the top of a preview; on a partner's subdomain it also says whose link this is.
+function siteName(shop: Shop, partner: Partner | null): string {
+  return `Alza.${shop.tld}${partner ? ` (${partner.label})` : ""}`;
 }
 
 function mdEsc(s: string): string {
@@ -424,8 +438,8 @@ function mdUrl(url: string): string {
 // Discord takes a button address of 512 characters at most; past that the carried query is dropped rather than the whole embed.
 const BUTTON_URL_MAX = 512;
 
-function buttonUrl(url: string, plain: string): string {
-  return url.length <= BUTTON_URL_MAX ? url : withUtm(plain);
+function buttonUrl(url: string, short: string): string {
+  return url.length <= BUTTON_URL_MAX ? url : short;
 }
 
 function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
@@ -447,7 +461,7 @@ function stateText(p: ProductData): string {
   return `${p.condition}, ${p.availabilityText.charAt(0).toLowerCase()}${p.availabilityText.slice(1)}`;
 }
 
-function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: string | null, carried: string, customEmoji: boolean): string | null {
+function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: string | null, carried: string, customEmoji: boolean, partner: Partner | null = null): string | null {
   const t = texts(shop.lang);
   const titleUrl = carried ? outbound(canonical, carried) : canonical;
   const titleLine = `### **[${mdEsc(p.name)}](${mdUrl(titleUrl)})** (${stateText(p)})`;
@@ -460,13 +474,14 @@ function componentEmbedJson(shop: Shop, p: ProductData, canonical: string, img: 
     ...(p.partial ? [`-# ${t.partial}`] : []),
   ];
   const humanUrl = outbound(canonical, carried);
-  const openUrl = buttonUrl(humanUrl, canonical);
+  const openUrl = buttonUrl(humanUrl, outbound(canonical, partner?.query ?? ""));
+  // Hlídač shopů looks the product up by this address, so it stays bare even on a partner's subdomain
   const historyUrl = `https://www.hlidacshopu.cz/app/?url=${encodeURIComponent(canonical)}`;
 
   const desc = p.description ? discordMd(p.description) : "";
 
   const build = (lines: string[], withThumb: boolean, withDesc = true): string => {
-    const parts = [`-# Alza.${shop.tld}`, titleLine];
+    const parts = [`-# ${siteName(shop, partner)}`, titleLine];
     if (withDesc && desc) {
       parts.push(desc);
       if (lines.length > 0) parts.push("");
@@ -519,7 +534,7 @@ function shortName(name: string, max = 70): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).replace(/[\s,;:-]+$/, "") + "…";
 }
 
-function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true, timedOut = false, everyLine = false): string {
+function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boolean, carried = "", missing = false, customEmoji = true, timedOut = false, everyLine = false, partner: Partner | null = null): string {
   const t = texts(shop.lang);
   const slugged = slugTitle(path);
   const productId = /-d(\d+)\.htm$/i.exec(path)?.[1];
@@ -556,20 +571,20 @@ function embedHtml(shop: Shop, p: ProductData | null, path: string, stale: boole
   }
 
   const img = p?.image ? `${p.image}?width=${IMG_W}&height=${IMG_W}` : null;
-  const componentJson = p && customEmoji ? componentEmbedJson(shop, p, canonical, img, carried, true) : null;
+  const componentJson = p && customEmoji ? componentEmbedJson(shop, p, canonical, img, carried, true, partner) : null;
 
   const tags = [
     `<meta charset="utf-8">`,
     `<title>${esc(title)} | ${p ? `Alza.${shop.tld}` : "fxalza"}</title>`,
     `<meta property="og:type" content="product">`,
-    `<meta property="og:site_name" content="${p ? `Alza.${shop.tld}` : "fxalza"}">`,
+    `<meta property="og:site_name" content="${p ? siteName(shop, partner) : "fxalza"}">`,
     `<meta property="og:title" content="${esc(title)}">`,
     `<meta name="description" content="${esc(desc)}">`,
     `<meta property="og:description" content="${esc(desc)}">`,
     img ? `<meta property="og:image" content="${esc(img)}">` : "",
     img ? `<meta property="og:image:width" content="${IMG_W}">` : "",
     img ? `<meta property="og:image:height" content="${IMG_W}">` : "",
-    customEmoji ? `<meta property="og:url" content="${esc(canonical)}">` : "",
+    customEmoji ? `<meta property="og:url" content="${esc(withAffiliate(canonical, partner?.query ?? ""))}">` : "",
     `<meta property="og:locale" content="${shop.locale.replace("-", "_")}">`,
     img ? `<meta property="og:image:alt" content="${esc(title)}">` : "",
     p?.price != null ? `<meta property="product:price:amount" content="${p.price}">` : "",
@@ -720,6 +735,10 @@ const server = http.createServer(async (req, res) => {
   // "sk.fxalza.cz" is the Slovak shop, the bare apex, www and m are the Czech one; a /alza.sk/... path can still change it below
   const hostShop = shopOfHost(hostOf(req), APEX);
   let shop: Shop = hostShop ?? CZ;
+  // "gb.fxalza.cz" is the Czech shop with a partner's code on its links. The code belongs to that one shop, so gb.fxalza.cz/alza.sk/... is an ordinary Slovak link.
+  const partner = partnerOfHost(hostOf(req), APEX);
+  const activePartner = (): Partner | null => (partner?.shop === shop.code ? partner : null);
+  const affiliate = (): string => activePartner()?.query ?? "";
 
   try {
     // A request that reached us on an open connection while we are stopping is sent elsewhere; the proxy retries it on a live instance.
@@ -766,7 +785,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const host = hostOf(req);
-    if (!isBot && !hostShop && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {
+    if (!isBot && !hostShop && !partner && host.endsWith(`.${APEX}`) && !SERVED_SUBDOMAINS.has(host.slice(0, -APEX.length - 1))) {
       const p = parseProductPath(withoutLanguagePrefix(u.pathname), u.searchParams.get("dq"));
       res.writeHead(302, { Location: p ? outbound(`https://www.alza.cz${p.path}`, carriedQuery(u.searchParams)) : `${PUBLIC_URL}/`, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
@@ -833,7 +852,7 @@ const server = http.createServer(async (req, res) => {
     }
     let parsed = parseProductPath(pathname, u.searchParams.get("dq"));
     if (!parsed && shop.code === "cz" && isKodPath(pathname)) {
-      const carried = carriedQuery(u.searchParams);
+      const carried = carriedQuery(u.searchParams, affiliate());
       if (!isBot) {
         evt = { url: "/kod", name: "click", data: { kind: "kod_list", ...visitorData(req, who) } };
         res.writeHead(302, { Location: outbound(`https://www.alza.cz${pathname}`, carried), "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
@@ -847,10 +866,17 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       res.writeHead(200, EMBED_PAGE_HEADERS);
-      res.end(req.method === "HEAD" ? undefined : kodHtml(list, pathname, carried, !who.telegram));
+      res.end(req.method === "HEAD" ? undefined : kodHtml(list, pathname, carried, !who.telegram, activePartner()));
       return;
     }
     if (!parsed && isBot) parsed = await withDeadline(resolveSlug(shop, pathname, who), PAGE_DEADLINE_MS, null);
+    // A partner's subdomain has no pages of its own: a visitor goes on to Alza from any address, the bare one included, and with the code.
+    if (!parsed && !isBot && affiliate() && !pathname.startsWith("/.well-known/")) {
+      evt = { url: logged, name: "click", data: { kind: "page", ...visitorData(req, who) } };
+      res.writeHead(302, { Location: outbound(`https://${shop.host}${pathname}`, carriedQuery(u.searchParams, affiliate())), "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
+      res.end();
+      return;
+    }
     if (!parsed) {
       if (pathname === "/" && !alza) {
         if (!isBot) evt = { url: "/", data: visitorData(req, who) };
@@ -880,7 +906,7 @@ const server = http.createServer(async (req, res) => {
             isBot,
             404,
             landingTexts(shop.lang).problems.notProductTitle,
-            landingTexts(shop.lang).problems.notProductBody(`alza.${shop.tld}`, siteHost(shop)),
+            landingTexts(shop.lang).problems.notProductBody(`alza.${shop.tld}`, affiliate() ? hostOf(req) : siteHost(shop)),
           );
         }
       }
@@ -896,7 +922,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const body = JSON.stringify(
-        data ? { ...data, shop: shop.code, stale } : { id: parsed.id, shop: shop.code, error: "fetch_failed", canonicalUrl: `https://${shop.host}${parsed.path}` },
+        data
+          ? { ...data, canonicalUrl: withAffiliate(data.canonicalUrl, affiliate()), shop: shop.code, stale }
+          : { id: parsed.id, shop: shop.code, error: "fetch_failed", canonicalUrl: withAffiliate(`https://${shop.host}${parsed.path}`, affiliate()) },
         null,
         1,
       );
@@ -914,7 +942,7 @@ const server = http.createServer(async (req, res) => {
 
     if (!isBot) {
       const known = getCached(keyOf(shop, parsed.id), true);
-      const target = outbound(cleanCanonical(known?.canonicalUrl) ?? `https://${shop.host}${parsed.path}`, carriedQuery(u.searchParams));
+      const target = outbound(cleanCanonical(known?.canonicalUrl) ?? `https://${shop.host}${parsed.path}`, carriedQuery(u.searchParams, affiliate()));
       evt = { url: `/product/${parsed.id}`, name: "click", data: { product: parsed.id, shop: shop.code, ...(known ? { name: shortName(known.name, 80) } : {}), ...visitorData(req, who) } };
       res.writeHead(302, { Location: target, "cache-control": "no-store", vary: "Accept-Encoding, User-Agent" });
       res.end();
@@ -949,7 +977,7 @@ const server = http.createServer(async (req, res) => {
       sendProblem(req, res, shop, isBot, 503, landingTexts(shop.lang).problems.loadTitle, landingTexts(shop.lang).problems.loadBody, { "retry-after": "30" }, false);
       return;
     }
-    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams), missing, !who.telegram, timedOut, !who.discord);
+    const html = embedHtml(shop, data, parsed.path, stale, carriedQuery(u.searchParams, affiliate()), missing, !who.telegram, timedOut, !who.discord, activePartner());
     res.writeHead(200, EMBED_PAGE_HEADERS);
     res.end(req.method === "HEAD" ? undefined : html);
   } catch (e) {
@@ -959,7 +987,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const requested = new URL(req.url ?? "/", "http://localhost");
       fallback = parseProductPath(withoutLanguagePrefix(requested.pathname), requested.searchParams.get("dq"));
-      fallbackQuery = carriedQuery(requested.searchParams);
+      fallbackQuery = carriedQuery(requested.searchParams, affiliate());
     } catch {
       fallback = null;
     }
@@ -976,7 +1004,7 @@ const server = http.createServer(async (req, res) => {
     console.log(`${new Date().toISOString()} ${isBot ? "bot " : "human"} ${res.statusCode} ${ms}ms ${logged} (${ua.slice(0, 40)})`);
     if (evt && req.method === "GET") {
       const seenHost = hostOf(req);
-      const shopTag = isExtensionHost(seenHost, APEX) ? "extension" : shop.code;
+      const shopTag = isExtensionHost(seenHost, APEX) ? "extension" : (activePartner()?.code ?? shop.code);
       // The Events chart lists names, and click/embed are the actual use of a shop, so the shop is part of the name.
       // A plain page view (the landing page) keeps no name: Umami then files it under Hostname and Tag, which ignore named events.
       const name = evt.name === "click" || evt.name === "embed" ? `${evt.name}/${shopTag}` : evt.name;

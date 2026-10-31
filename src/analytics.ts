@@ -31,7 +31,7 @@ export interface TrackEvent {
   ip?: string;
   // Address the visitor opened. Umami's Hostname report reads this; events without one are filed under the apex.
   hostname?: string;
-  // Shop code (cz, sk, hu, de, at). Umami's Tag report and filters read this.
+  // Shop code (cz, sk, hu, de, at) or partner code (gb). Umami's Tag report and filters read this.
   tag?: string;
 }
 
