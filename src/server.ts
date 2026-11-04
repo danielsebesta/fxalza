@@ -446,7 +446,7 @@ function buttonUrl(url: string, short: string): string {
 
 function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
   const shownPercent = e.percentShown ?? (e.percent === null ? null : Math.round(e.percent));
-  const pct = shownPercent !== null && shownPercent > 0 ? ` (-${shownPercent} %)` : "";
+  const pct = shownPercent !== null && shownPercent > 0 ? ` (-${String(shownPercent).replace(".", ",")} %)` : "";
   const was = e.wasPriceText ? `${e.wasPriceText} → ` : "";
   const name = e.note ? `${e.label} + ${e.note}` : e.label;
   if (!rich) return `${benefitEmoji(e, custom)} ${name} ${was}${e.priceText}${pct}`;
@@ -769,7 +769,9 @@ const server = http.createServer(async (req, res) => {
     // Only the path and query are read from the request target; the host comes from hostOf(), so a malformed Host header cannot break the parse.
     let u: URL;
     try {
-      u = new URL(req.url ?? "/", "http://localhost");
+      // "//product.htm" would be read as a host of its own, so a link pasted with a doubled slash would lose its whole path;
+      // a first segment with a dot is a host ("//other.host/x" stays what it is), one without it, or a .htm, is a path
+      u = new URL((req.url ?? "/").replace(/^\/{2,}(?=[^/?#.]+(?:[/?#]|$)|[^/?#]*\.htm(?:[?#]|$))/, "/"), "http://localhost");
     } catch {
       res.writeHead(400, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       res.end("Bad request\n");

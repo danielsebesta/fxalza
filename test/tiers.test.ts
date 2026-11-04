@@ -32,14 +32,13 @@ test("ISIC and B2B keep their own prices even when Gold is visible (Huawei MateP
   assert.deepEqual(labels, ["B2B", "ISIC", "Gold", "Silver", "Bronze"]);
 });
 
-test("club prices show the discount cut to whole percent like the Alza labels", () => {
+test("club prices show the discount with one decimal like the Alza price list", () => {
   const f = fixtures.find((x) => x.id === "13028740")!;
   const shown = Object.fromEntries(buildBenefits(present(f)).entries.map((e) => [e.label, e.percentShown]));
-  // Alza: Bronze Sleva -2 %, Silver -5 %, Gold -8 %, B2B -10 %, ISIC -10 %
-  assert.deepEqual(shown, { B2B: 10, ISIC: 10, Gold: 8, Silver: 5, Bronze: 2 });
+  assert.deepEqual(shown, { B2B: 11, ISIC: 10, Gold: 8.9, Silver: 5.9, Bronze: 3 });
 });
 
-test("club discounts are cut, not rounded, and measured from the crossed out price on a sale", () => {
+test("club discounts are rounded to a tenth of the printed prices and measured from the crossed out price on a sale", () => {
   const price = (amount: number) => ({ amount, promo: false, priceType: null, name: "", coupon: "" });
   const tier = (name: string, amount: number, compare?: number): TierResult => ({
     tier: name,
@@ -51,16 +50,15 @@ test("club discounts are cut, not rounded, and measured from the crossed out pri
   });
   const gold = (basic: TierResult, amount: number) =>
     buildBenefits(new Map([["Basic", basic], ["Gold", tier("Gold", amount)]])).entries.find((e) => e.kind === "tier")!.percentShown;
-  // 13.9997 % is -13 % on Alza, a half koruna tolerance would have made it 14
-  assert.equal(gold(tier("Basic", 3279), 2819.96), 13);
+  assert.equal(gold(tier("Basic", 3279), 2819.96), 14);
   // Alza counts from the crossed out 309, not from the sale price 279 (16.5 %)
-  assert.equal(gold(tier("Basic", 279, 309), 232.96), 24);
+  assert.equal(gold(tier("Basic", 279, 309), 232.96), 24.6);
   // printed as 729 Kč, but really 728.80 Kč, which is 11.0 % off 819 Kč (10.989 % from the printed price)
   const silver = (basic: TierResult, selected: TierResult) =>
     buildBenefits(new Map([["Basic", basic], ["Silver", selected]])).entries.find((e) => e.kind === "tier")!.percentShown;
   const exact = tier("Silver", 729);
   exact.main!.exact = exact.selected!.exact = 728.8;
-  assert.equal(silver(tier("Basic", 819), tier("Silver", 729)), 10);
+  assert.equal(silver(tier("Basic", 819), tier("Silver", 729)), 11);
   assert.equal(silver(tier("Basic", 819), exact), 11);
   // tiers that print the same price but are not the same price stay on separate lines
   const other = tier("Gold", 729);

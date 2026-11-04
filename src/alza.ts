@@ -13,7 +13,7 @@ import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 export { stopSidecar } from "./fetcher.ts";
 
 export interface BenefitEntry {
-  kind: "sale" | "blackfriday" | "coupon" | "alzaplus" | "cashback" | "tradein" | "promo" | "tier";
+  kind: "sale" | "blackfriday" | "coupon" | "alzaplus" | "cashback" | "tradein" | "promo" | "tier" | "levy";
   label: string;
   price: number;
   priceText: string;
@@ -69,6 +69,12 @@ export const TIERS: TierDef[] = [
 export function tiersFor(shop: Shop): TierDef[] {
   return shop.hasIsic ? TIERS : TIERS.filter((t) => t.name !== "ISIC");
 }
+
+// The price group a buyer lands in after confirming the no-levy purchase (memory media sold "Bez autorského poplatku").
+// Outside a levy-bearing product it returns the ordinary price, so the fetch goes to every shop and only a real difference shows.
+// This is the Gold list with the levy confirmed away (p_pg1cd1_af922 is the Silver one). The same list without the cd1 is the ordinary
+// Gold tier, so the levy is only real where the two differ.
+const LEVY_TIER: TierDef = { name: "NoLevy", pgrik: "p_pg2cd1_ddb4b", reference: true };
 
 export interface PriceCandidate {
   amount: number;
@@ -207,18 +213,36 @@ export function followerTiers(byTier: Map<string, TierResult>): string[] {
 
 async function fetchBenefits(shop: Shop, id: string): Promise<BenefitsResult> {
   const byTier = new Map<string, TierResult>();
+  let noLevy: TierResult | null = null;
   const load = (t: TierDef): Promise<void> =>
     fetchTier(id, t, shop)
       .then((r) => {
         if (r) byTier.set(r.tier, r);
       })
       .catch(() => {});
+  // The no-levy list is not a club tier, so it stays out of byTier and out of the completeness count.
+  const loadLevy = (): Promise<void> =>
+    fetchTier(id, LEVY_TIER, shop)
+      .then((r) => {
+        noLevy = r;
+      })
+      .catch(() => {});
+  // That group can carry a club discount of its own, so it counts as a levy only when it undercuts the same group
+  // without the levy and that group costs what the basic list does.
+  const levyOf = (m: Map<string, TierResult>): TierResult | null => {
+    const a = (noLevy as TierResult | null)?.main?.amount;
+    const base = m.get("Basic")?.main?.amount;
+    // a Gold list that gives no discount comes back hidden, and then it costs what the basic list does
+    const gold = m.get("Gold");
+    const b = gold?.hidden ? base : gold?.main?.amount;
+    return a !== undefined && b !== undefined && base !== undefined && a < b - 0.004 && Math.abs(b - base) < 0.004 ? noLevy : null;
+  };
   const done = (m: Map<string, TierResult>): BenefitsResult => ({
-    ...buildBenefits(m, shop),
+    ...buildBenefits(m, shop, levyOf(m)),
     complete: firstTiers(shop).every((t) => m.has(t.name)) && followerTiers(m).every((n) => m.has(n)),
   });
   const all = (async () => {
-    await Promise.all(firstTiers(shop).map(load));
+    await Promise.all([...firstTiers(shop).map(load), loadLevy()]);
     await Promise.all(tiersFor(shop).filter((t) => followerTiers(byTier).includes(t.name)).map(load));
   })();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -279,7 +303,7 @@ function isicPrice(isic: TierResult, basic: TierResult | undefined, shop: Shop):
   return null;
 }
 
-export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ): BenefitsResult {
+export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ, levy: TierResult | null = null): BenefitsResult {
   const t = texts(shop.lang);
   const money = (n: number): string => formatMoney(shop, n, true);
   const basic = byTier.get("Basic");
@@ -293,10 +317,10 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ):
     const half = shop.currency === "EUR" ? 0.005 : 0.5;
     return exact === null ? null : Math.floor(exact + (half * 100) / denominator! + 1e-9);
   };
-  // The club labels on Alza ("Gold Sleva -8 %") cut the exact discount to whole percent, measured from the crossed out price when the product is on sale.
-  const clubBase = basic?.compare && base && basic.compare > base + 0.004 ? basic.compare : (basic?.main?.exact ?? base);
+  // The Alza price list prints the club discount with one decimal ("Gold -27,5 %"), measured from the crossed out price when the product is on sale.
+  const clubBase = basic?.compare && base && basic.compare > base + 0.004 ? basic.compare : base;
   const clubShown = (amount: number): number | null =>
-    clubBase && clubBase > amount ? Math.floor(((clubBase - amount) / clubBase) * 100 + 1e-9) : null;
+    clubBase && clubBase > amount ? Math.round(((clubBase - amount) / clubBase) * 1000 + 1e-7) / 10 : null;
 
   if (basic?.compare && base && basic.compare > base + 0.004) {
     entries.push({
@@ -389,8 +413,21 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ):
       price: r.best,
       priceText: money(r.best),
       percent: percent(r.best),
-      percentShown: clubShown(r.bestExact),
+      percentShown: clubShown(r.best),
       ...(r.promo ? { wasPriceText: money(r.listPrice), note: promoTag(r.promo, shop) } : {}),
+    });
+  }
+
+  // The no-levy price only matters on media the copyright levy actually loads; everywhere else it equals the basic price.
+  const levyPrice = levy?.main;
+  if (levyPrice && base && levyPrice.amount < base - 0.004) {
+    entries.push({
+      kind: "levy",
+      label: t.levy,
+      price: levyPrice.amount,
+      priceText: money(levyPrice.amount),
+      percent: percent(levyPrice.amount),
+      percentShown: shown(levyPrice.amount),
     });
   }
 
@@ -403,6 +440,7 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ):
     tradein: 3,
     promo: 4,
     tier: 5,
+    levy: 6,
   };
   entries.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.price - b.price);
   return { entries: entries.slice(0, 8), complete: byTier.size === tiersFor(shop).length };

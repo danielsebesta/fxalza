@@ -13,6 +13,7 @@ export interface Texts {
   tradein: string;
   cashback: string;
   promo: string;
+  levy: string;
   tagCoupon: string;
   tagTradein: string;
   tagCashback: string;
@@ -57,6 +58,7 @@ const cs: Texts = {
   tradein: "S výkupním bonusem",
   cashback: "S Cashback",
   promo: "Akční cena",
+  levy: "Bez autorského poplatku",
   tagCoupon: "kód",
   tagTradein: "výkup",
   tagCashback: "cashback",
@@ -100,6 +102,7 @@ const sk: Texts = {
   tradein: "S výkupom",
   cashback: "S Cashback",
   promo: "Akčná cena",
+  levy: "Bez autorského poplatku",
   tagCoupon: "kód",
   tagTradein: "výkup",
   tagCashback: "cashback",
@@ -143,6 +146,7 @@ const hu: Texts = {
   tradein: "Beszámítással",
   cashback: "Cashback",
   promo: "Akciós ár",
+  levy: "Szerzői jogdíj nélkül",
   tagCoupon: "kód",
   tagTradein: "beszámítás",
   tagCashback: "cashback",
@@ -185,6 +189,7 @@ const de: Texts = {
   tradein: "Mit Inzahlungnahme",
   cashback: "Mit Cashback",
   promo: "Aktionspreis",
+  levy: "Ohne Urheberrechtsabgabe",
   tagCoupon: "Code",
   tagTradein: "Inzahlungnahme",
   tagCashback: "Cashback",

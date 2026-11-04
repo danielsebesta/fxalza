@@ -43,6 +43,7 @@ const KIND: Record<BenefitEntry["kind"], [string, string]> = {
   tradein: ["alza_tradein", "♻️"],
   promo: ["alza_promo", "🏷️"],
   tier: ["alza_basic", "🏅"],
+  levy: ["alza_levy", "©️"],
 };
 
 const TIER: Record<string, string> = {
