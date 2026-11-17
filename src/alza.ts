@@ -161,6 +161,8 @@ export async function fetchTier(id: string, tier: TierDef, shop: Shop = CZ): Pro
     res = await fetchUrl(url, {
       headers: { Accept: "application/json, text/html;q=0.9" },
       timeoutMs: 8000,
+      // a tier can arrive late, so the second worker only helps when the first one is slow
+      workerStaggerMs: 400,
       prefer: ["firecrawl"],
       country: shop.country,
     });
@@ -195,6 +197,7 @@ interface BenefitsResult {
 }
 
 const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 3200);
+const LEVY_WAIT_MS = Number(process.env.LEVY_WAIT_MS ?? 600);
 const LEAN_TIERS = process.env.TIERS_LEAN !== "0";
 const CLUB_FOLLOWERS = ["Silver", "Bronze"];
 const firstTiers = (shop: Shop): TierDef[] => (LEAN_TIERS ? tiersFor(shop).filter((t) => !CLUB_FOLLOWERS.includes(t.name)) : tiersFor(shop));
@@ -241,19 +244,29 @@ async function fetchBenefits(shop: Shop, id: string): Promise<BenefitsResult> {
     ...buildBenefits(m, shop, levyOf(m)),
     complete: firstTiers(shop).every((t) => m.has(t.name)) && followerTiers(m).every((n) => m.has(n)),
   });
-  const all = (async () => {
-    await Promise.all([...firstTiers(shop).map(load), loadLevy()]);
-    await Promise.all(tiersFor(shop).filter((t) => followerTiers(byTier).includes(t.name)).map(load));
+  // The club lists decide the embed. The no-levy list is a side line that only matters on media, so it gets a short extra wait
+  // once everything else is in and is delivered late when it is slower than that.
+  const core = (async () => {
+    const first = firstTiers(shop);
+    const loads = new Map(first.map((t) => [t.name, load(t)]));
+    // Silver and Bronze start the moment Gold and Basic are both in (the club discount is measured against Basic), not after the slowest list
+    const followers = Promise.all([loads.get("Gold"), loads.get("Basic")]).then(() =>
+      Promise.all(tiersFor(shop).filter((f) => followerTiers(byTier).includes(f.name)).map(load)),
+    );
+    await Promise.all([...loads.values(), followers]);
   })();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const inTime = await Promise.race([
-    all.then(() => true),
-    new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(false), TIER_SOFT_MS);
-    }),
-  ]);
-  clearTimeout(timer);
-  if (inTime) return done(byTier);
+  let levyDone = false;
+  const levy = loadLevy().then(() => {
+    levyDone = true;
+  });
+  const all = Promise.all([core, levy]);
+  const timeout = (ms: number): Promise<boolean> => new Promise((resolve) => setTimeout(() => resolve(false), ms).unref());
+  const inTime = await Promise.race([core.then(() => true), timeout(TIER_SOFT_MS)]);
+  if (inTime) {
+    await Promise.race([levy, timeout(LEVY_WAIT_MS)]);
+    const now = done(byTier);
+    return levyDone ? now : { ...now, later: all.then(() => done(byTier)) };
+  }
   const early = done(new Map(byTier));
   console.log(`[benefits] ${id} ${byTier.size} tiers after ${TIER_SOFT_MS}ms, the rest follows`);
   return { ...early, later: all.then(() => done(byTier)) };

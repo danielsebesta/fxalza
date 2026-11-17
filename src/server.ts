@@ -6,7 +6,7 @@ import { platformOf, track, type TrackEvent } from "./analytics.ts";
 import { isKodPath, kodCodes, type KodList } from "./kodlist.ts";
 import { isExtensionHost, isRetryRequest, parseProductPath, withoutLanguagePrefix, type Parsed } from "./parse.ts";
 import { OverloadedError } from "./sidecar.ts";
-import { sidecarStats } from "./fetcher.ts";
+import { sidecarStats, keepWorkersWarm } from "./fetcher.ts";
 import { cacheSize, flushCache, getCached, peekCached, putCached } from "./cache.ts";
 import { benefitEmoji, emojiMd, emojiRef } from "./emoji.ts";
 import { printStartupReport } from "./startup.ts";
@@ -1050,7 +1050,7 @@ process.on("uncaughtException", (e) => {
 const WARMUP_IDS = (process.env.WARMUP_IDS ?? "13067221,7356338").split(",").map((s) => s.trim()).filter(Boolean);
 
 async function warmUp(): Promise<void> {
-  for (const id of WARMUP_IDS) {
+  await Promise.all(WARMUP_IDS.map(async (id) => {
     const started = Date.now();
     try {
       await refresh(CZ, id, `/-d${id}.htm`);
@@ -1058,7 +1058,7 @@ async function warmUp(): Promise<void> {
     } catch (e) {
       console.log(`[warmup] ${id} failed after ${Date.now() - started}ms: ${e instanceof Error ? e.message : e}`);
     }
-  }
+  }));
 }
 
 server.on("error", (e: NodeJS.ErrnoException) => {
@@ -1070,6 +1070,7 @@ server.on("error", (e: NodeJS.ErrnoException) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[server] fxalza listening on http://${HOST}:${PORT}`);
+  keepWorkersWarm();
   // the report follows the warm-up, by then the sidecar workers are up and the first answers of Alza are in
   void warmUp()
     .then(() => printStartupReport())

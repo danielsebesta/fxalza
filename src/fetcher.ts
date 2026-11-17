@@ -14,6 +14,8 @@ export interface FetchOpts {
   prefer?: string[];
   // the country the request should come from where a provider can choose, the shop's own
   country?: string;
+  // Set for calls that can wait: the second worker then starts this many ms after the first instead of alongside it, which halves the worker requests.
+  workerStaggerMs?: number;
 }
 
 export interface Provider {
@@ -179,6 +181,22 @@ export function parseCfWorkers(raw: string | undefined): CfWorker[] {
     .map(([url, token], i) => ({ name: i === 0 ? "cfworker" : `cfworker${i + 1}`, url: url!.replace(/\/$/, ""), token: token! }));
 }
 const cfWorkers = parseCfWorkers(process.env.CF_WORKERS);
+// A Cloudflare worker that sat idle starts cold and the connection to it has to be set up again, which cost a request seconds.
+// A cheap call (the worker answers 400 without an address) every WORKER_WARM_MS (5 minutes, the free plan counts every call) keeps the isolate and the connection ready. 0 turns it off.
+const WORKER_WARM_MS = Number(process.env.WORKER_WARM_MS ?? 300_000);
+export function keepWorkersWarm(): void {
+  if (cfWorkers.length === 0 || WORKER_WARM_MS <= 0) return;
+  const ping = (): void => {
+    for (const w of cfWorkers) {
+      fetch(`${w.url}/?url=`, { headers: { "x-token": w.token }, signal: AbortSignal.timeout(5000) })
+        .then((r) => r.body?.cancel())
+        .catch(() => {});
+    }
+  };
+  ping();
+  setInterval(ping, WORKER_WARM_MS).unref();
+}
+
 const sidecarBlocked = (): boolean => sidecarBlockedUntil > Date.now() && (cfWorkers.length > 0 || firecrawl.available());
 
 const providers: Provider[] = [
@@ -336,7 +354,7 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
   return outcome;
 }
 
-// The free providers go first, our own workers in the order they were given, then the sidecar, which is waited for alone. Paid
+// The free providers go first, our own workers all at once (the first usable answer wins), then the sidecar, which is waited for alone. Paid
 // providers follow in order, but when one has not answered after hedgeMs the next one starts alongside it and the first usable
 // answer wins, so one slow provider does not eat the whole deadline of an embed.
 // The ones still running when a winner is in are aborted, so a lost race does not keep a connection (and a paid request) open.
@@ -347,6 +365,9 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
   let winner: FetchResult | null = null;
   let overloaded: OverloadedError | null = null;
   const pending = new Set<Promise<void>>();
+  // lets a worker that answers end the wait on a slower provider (the sidecar is waited for alone)
+  let onWin: () => void = () => {};
+  const won = new Promise<void>((resolve) => (onWin = resolve));
   const running = new Map<Promise<void>, AbortController>();
 
   const order = list
@@ -354,13 +375,16 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
     .sort((a, b) => a.rank - b.rank || (opts.prefer?.indexOf(a.p.name) ?? 0) - (opts.prefer?.indexOf(b.p.name) ?? 0))
     .map((x) => x.p);
 
-  for (const p of order) {
+  for (const [n, p] of order.entries()) {
     if (winner || overloaded) break;
     if (!runnable(p)) continue;
     const controller = new AbortController();
     const job: Promise<void> = attempt(p, url, opts, timeoutMs, controller.signal)
       .then((a) => {
-        if (a.result && !winner) winner = a.result;
+        if (a.result && !winner) {
+          winner = a.result;
+          onWin();
+        }
         if (a.last) last = a.last;
         if (a.error) errors.push(a.error);
         if (a.overloaded) overloaded = a.overloaded;
@@ -371,12 +395,15 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
       });
     pending.add(job);
     running.set(job, controller);
+    // our own workers cost nothing, so they all start together and the first usable answer wins
+    if (p.free && order[n + 1]?.free && !opts.workerStaggerMs) continue;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const stagger = p.name === "sidecar" ? new Promise<void>(() => {}) : new Promise<void>((resolve) => (timer = setTimeout(resolve, hedgeMs)));
-    await Promise.race([job, stagger]);
+    const stagger = p.free && opts.workerStaggerMs && order[n + 1]?.free ? new Promise<void>((resolve) => (timer = setTimeout(resolve, opts.workerStaggerMs))) : p.name === "sidecar" ? new Promise<void>(() => {}) : new Promise<void>((resolve) => (timer = setTimeout(resolve, hedgeMs)));
+    await Promise.race([job, stagger, won]);
     clearTimeout(timer);
   }
-  while (!winner && !overloaded && pending.size > 0) await Promise.race([...pending]);
+  // an overloaded sidecar stops new work, but a worker still running may yet answer
+  while (!winner && pending.size > 0) await Promise.race([...pending]);
 
   if (winner) {
     for (const controller of running.values()) controller.abort(new Error("another provider answered first"));
