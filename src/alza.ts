@@ -713,7 +713,7 @@ export function blackFridayEntry(html: string, shop: Shop): (BenefitEntry & { wa
 }
 
 // The Black Friday price is the sale of this product, so it takes the place of an ordinary sale line. Alza measures every other
-// price on the page from the crossed out one, so their percent is worked out from it too (the club labels cut it to whole percent).
+// price on the page from the crossed out one, so their percent is worked out from it too (the club rows go to a tenth of a percent).
 export function withBlackFriday(benefits: BenefitEntry[], bf: (BenefitEntry & { was?: number }) | null, shop: Shop): BenefitEntry[] {
   if (!bf) return benefits;
   const { was, ...entry } = bf;
@@ -723,7 +723,7 @@ export function withBlackFriday(benefits: BenefitEntry[], bf: (BenefitEntry & { 
       if (!was || b.kind === "coupon" || !(was > b.price)) return b;
       const exact = ((was - b.price) / was) * 100;
       const half = shop.currency === "EUR" ? 0.005 : 0.5;
-      const percentShown = b.kind === "tier" ? Math.floor(exact + 1e-9) : Math.floor(exact + (half * 100) / was + 1e-9);
+      const percentShown = b.kind === "tier" ? Math.round(exact * 10 + 1e-7) / 10 : Math.floor(exact + (half * 100) / was + 1e-9);
       return { ...b, percent: exact, percentShown };
     });
   return [entry, ...rest];
