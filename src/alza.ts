@@ -48,7 +48,9 @@ export interface ProductData {
 }
 
 const BENEFITS_ENABLED = process.env.BENEFITS !== "0";
-const BENEFITS_GRACE_MS = Number(process.env.BENEFITS_GRACE_MS ?? 1500);
+// How long the card waits for the price tiers, counted from the start of the product fetch. Discord gives a link about five
+// seconds (EMBED_DEADLINE_MS in the server), so the tiers get most of it and the rest is left for the page and the card.
+const BENEFITS_BUDGET_MS = Number(process.env.BENEFITS_BUDGET_MS ?? 4500);
 
 export interface TierDef {
   name: string;
@@ -196,11 +198,11 @@ interface BenefitsResult {
   later?: Promise<BenefitsResult>;
 }
 
-const TIER_SOFT_MS = Number(process.env.TIER_SOFT_MS ?? 3200);
 const LEVY_WAIT_MS = Number(process.env.LEVY_WAIT_MS ?? 600);
-const LEAN_TIERS = process.env.TIERS_LEAN !== "0";
 const CLUB_FOLLOWERS = ["Silver", "Bronze"];
-const firstTiers = (shop: Shop): TierDef[] => (LEAN_TIERS ? tiersFor(shop).filter((t) => !CLUB_FOLLOWERS.includes(t.name)) : tiersFor(shop));
+// The tiers a complete result always needs. Silver and Bronze are the club and only have a price when Gold has one, so they
+// are not required when Gold comes back hidden.
+const requiredTiers = (shop: Shop): TierDef[] => tiersFor(shop).filter((t) => !CLUB_FOLLOWERS.includes(t.name));
 
 function clubPriceVisible(t: TierResult | undefined, base: number | null): boolean {
   return !!t && !t.hidden && !!t.main && !!t.selected && base !== null && t.main.amount < base - 0.004;
@@ -208,13 +210,18 @@ function clubPriceVisible(t: TierResult | undefined, base: number | null): boole
 
 // Gold, Silver and Bronze are the club, so Silver and Bronze only have a price when Gold has one
 // (49 of 49 sampled products without a Gold price had none). ISIC and B2B are separate programs
-// with prices of their own, so they are always fetched and never copied into Silver or Bronze.
+// with prices of their own, so they are never copied into Silver or Bronze.
 export function followerTiers(byTier: Map<string, TierResult>): string[] {
-  if (!LEAN_TIERS) return [];
   return clubPriceVisible(byTier.get("Gold"), byTier.get("Basic")?.main?.amount ?? null) ? CLUB_FOLLOWERS : [];
 }
 
-async function fetchBenefits(shop: Shop, id: string): Promise<BenefitsResult> {
+// A result is complete when every tier that is always required has answered, and the club followers too when Gold shows a
+// club price. A hidden Gold makes Silver and Bronze hidden, so their absence is not a missing price.
+export function benefitsComplete(byTier: Map<string, TierResult>, shop: Shop = CZ): boolean {
+  return requiredTiers(shop).every((t) => byTier.has(t.name)) && followerTiers(byTier).every((n) => byTier.has(n));
+}
+
+async function fetchBenefits(shop: Shop, id: string, deadline: number): Promise<BenefitsResult> {
   const byTier = new Map<string, TierResult>();
   let noLevy: TierResult | null = null;
   const load = (t: TierDef): Promise<void> =>
@@ -240,35 +247,27 @@ async function fetchBenefits(shop: Shop, id: string): Promise<BenefitsResult> {
     const b = gold?.hidden ? base : gold?.main?.amount;
     return a !== undefined && b !== undefined && base !== undefined && a < b - 0.004 && Math.abs(b - base) < 0.004 ? noLevy : null;
   };
-  const done = (m: Map<string, TierResult>): BenefitsResult => ({
-    ...buildBenefits(m, shop, levyOf(m)),
-    complete: firstTiers(shop).every((t) => m.has(t.name)) && followerTiers(m).every((n) => m.has(n)),
-  });
-  // The club lists decide the embed. The no-levy list is a side line that only matters on media, so it gets a short extra wait
-  // once everything else is in and is delivered late when it is slower than that.
-  const core = (async () => {
-    const first = firstTiers(shop);
-    const loads = new Map(first.map((t) => [t.name, load(t)]));
-    // Silver and Bronze start the moment Gold and Basic are both in (the club discount is measured against Basic), not after the slowest list
-    const followers = Promise.all([loads.get("Gold"), loads.get("Basic")]).then(() =>
-      Promise.all(tiersFor(shop).filter((f) => followerTiers(byTier).includes(f.name)).map(load)),
-    );
-    await Promise.all([...loads.values(), followers]);
-  })();
+  const done = (m: Map<string, TierResult>): BenefitsResult => buildBenefits(m, shop, levyOf(m));
+  // Every tier starts at once. Silver and Bronze used to wait for Gold and Basic, which put a whole round trip in front of
+  // the club rows on every product that has them; a hidden Gold makes them hidden too, so the two requests are the price of
+  // a card that arrives complete.
+  const core = Promise.all(tiersFor(shop).map(load));
   let levyDone = false;
   const levy = loadLevy().then(() => {
     levyDone = true;
   });
   const all = Promise.all([core, levy]);
+  const left = (): number => Math.max(0, deadline - Date.now());
   const timeout = (ms: number): Promise<boolean> => new Promise((resolve) => setTimeout(() => resolve(false), ms).unref());
-  const inTime = await Promise.race([core.then(() => true), timeout(TIER_SOFT_MS)]);
+  const inTime = await Promise.race([core.then(() => true), timeout(left())]);
   if (inTime) {
-    await Promise.race([levy, timeout(LEVY_WAIT_MS)]);
+    // The no-levy list is a side line that only matters on media, so it gets a short extra wait and is delivered late after that.
+    await Promise.race([levy, timeout(Math.min(LEVY_WAIT_MS, left()))]);
     const now = done(byTier);
     return levyDone ? now : { ...now, later: all.then(() => done(byTier)) };
   }
-  const early = done(new Map(byTier));
-  console.log(`[benefits] ${id} ${byTier.size} tiers after ${TIER_SOFT_MS}ms, the rest follows`);
+  const early = done(byTier);
+  console.log(`[benefits] ${id} ${byTier.size} of ${tiersFor(shop).length} tiers after ${BENEFITS_BUDGET_MS - left()}ms, the rest follows`);
   return { ...early, later: all.then(() => done(byTier)) };
 }
 
@@ -456,7 +455,7 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ, 
     levy: 6,
   };
   entries.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.price - b.price);
-  return { entries: entries.slice(0, 8), complete: byTier.size === tiersFor(shop).length };
+  return { entries: entries.slice(0, 8), complete: benefitsComplete(byTier, shop) };
 }
 
 // Schema.org reports an incoming shipment as InStock, because it can already be ordered. The stock label is what the page shows.
@@ -750,11 +749,12 @@ export async function fetchProduct(
 ): Promise<ProductData> {
   const t = texts(shop.lang);
   const benefitsStarted = Date.now();
+  const benefitsDeadline = benefitsStarted + BENEFITS_BUDGET_MS;
   let blackFriday: ReturnType<typeof blackFridayEntry> = null;
   const lateWithBf = onLateBenefits && ((b: BenefitEntry[], complete: boolean) => onLateBenefits(withBlackFriday(b, blackFriday, shop), complete));
   // The id is already known from the link, so the price tiers load while the page itself is still on its way.
   const benefitsPromise: Promise<BenefitsResult> = BENEFITS_ENABLED
-    ? fetchBenefits(shop, id).catch((e) => {
+    ? fetchBenefits(shop, id, benefitsDeadline).catch((e) => {
         console.error(`[benefits] ${id}: ${e instanceof Error ? e.message : e}`);
         return { entries: [], complete: false };
       })
@@ -804,16 +804,6 @@ export async function fetchProduct(
   const canonicalUrl = claimedUrl ? (() => { const c = new URL(claimedUrl); c.pathname = withoutLanguagePrefix(c.pathname); return c.toString(); })() : `https://${shop.host}${path}`;
   if (image && !httpsUrlOn(image, "alza.cz") && !httpsUrlOn(image, `alza.${shop.tld}`)) image = null;
 
-  let benefits: BenefitEntry[] = [];
-  let partial = true;
-  let grace: ReturnType<typeof setTimeout> | undefined;
-  const ready = await Promise.race([
-    benefitsPromise.then((b) => ({ b })),
-    new Promise<null>((resolve) => {
-      grace = setTimeout(() => resolve(null), BENEFITS_GRACE_MS);
-    }),
-  ]);
-  clearTimeout(grace);
   // The late deliveries run after this function has returned, so a failure in them has nothing to propagate to and is logged here.
   const deliver = (b: BenefitsResult): void => {
     try {
@@ -823,30 +813,18 @@ export async function fetchProduct(
     }
   };
   const lateFailed = (e: unknown): void => console.error(`[benefits] ${id} late tiers failed: ${e instanceof Error ? e.message : e}`);
-  if (ready) {
-    benefits = ready.b.entries;
-    partial = !ready.b.complete;
-    track({ url: "/benefits", name: "benefits", data: { outcome: "in_time", ms: Date.now() - benefitsStarted, entries: ready.b.entries.length, complete: ready.b.complete } });
-    ready.b.later
-      ?.then((l) => {
-        console.log(`[benefits] ${id} completed late (${l.entries.length})`);
-        deliver(l);
-      })
-      .catch(lateFailed);
-  }
-  else {
-    console.log(`[benefits] ${id} not ready after ${BENEFITS_GRACE_MS}ms, answering without them`);
-    benefitsPromise
-      .then((b) => {
-        if (b.entries.length > 0 || b.complete) {
-          console.log(`[benefits] ${id} arrived late (${b.entries.length})`);
-          track({ url: "/benefits", name: "benefits", data: { outcome: "late", ms: Date.now() - benefitsStarted, entries: b.entries.length, complete: b.complete } });
-          deliver(b);
-        }
-        b.later?.then(deliver).catch(lateFailed);
-      })
-      .catch(lateFailed);
-  }
+  // fetchBenefits answers by the deadline whatever the tiers are doing, so this wait is bounded and the card is built from
+  // what is in rather than from nothing.
+  const b = await benefitsPromise;
+  const benefits = b.entries;
+  const partial = !b.complete;
+  track({ url: "/benefits", name: "benefits", data: { outcome: b.complete ? "in_time" : "late", ms: Date.now() - benefitsStarted, entries: b.entries.length, complete: b.complete } });
+  b.later
+    ?.then((l) => {
+      console.log(`[benefits] ${id} completed late (${l.entries.length})`);
+      deliver(l);
+    })
+    .catch(lateFailed);
 
   const history = await historyPromise;
 

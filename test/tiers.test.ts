@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { availabilityKey, buildBenefits, conditionText, followerTiers, type TierResult } from "../src/alza.ts";
+import { availabilityKey, benefitsComplete, buildBenefits, conditionText, followerTiers, type TierResult } from "../src/alza.ts";
 import { texts } from "../src/i18n.ts";
 import { SHOPS } from "../src/shops.ts";
 
@@ -14,9 +14,9 @@ const fixtures = JSON.parse(readFileSync(new URL("./fixtures/tiers.json", import
 const present = (f: Fixture): Map<string, TierResult> =>
   new Map(Object.entries(f.tiers).filter((e): e is [string, TierResult] => e[1] !== null));
 
-// Captured from real Alza responses. Silver and Bronze are only requested when Gold has a club
-// price, everything else is always requested, so the result has to equal fetching all six tiers.
-test("fetching Silver and Bronze only behind a visible Gold gives the same benefits as all six tiers", () => {
+// Captured from real Alza responses. Silver and Bronze are only needed when Gold has a club price,
+// everything else is always needed, so the result has to equal fetching all six tiers.
+test("Silver and Bronze are only needed behind a visible Gold, and then give the same rows as all six tiers", () => {
   assert.ok(fixtures.length >= 5);
   for (const f of fixtures) {
     const full = present(f);
@@ -67,10 +67,34 @@ test("club discounts are rounded to a tenth of the printed prices and measured f
   assert.deepEqual(labels, ["Gold", "Silver"]);
 });
 
-test("a hidden Gold tier means Silver and Bronze are not requested", () => {
+test("a hidden Gold tier means Silver and Bronze are not required", () => {
   const f = fixtures.find((x) => x.tiers.Gold?.hidden)!;
   const firstRound = new Map([...present(f)].filter(([name]) => name !== "Silver" && name !== "Bronze"));
   assert.deepEqual(followerTiers(firstRound), []);
+});
+
+test("a card is complete without Silver and Bronze when Gold has no club price, and partial when it has one", () => {
+  const price = (amount: number) => ({ amount, promo: false, priceType: null, name: "", coupon: "" });
+  const tier = (name: string, amount: number, hidden = false): TierResult => ({
+    tier: name,
+    hidden,
+    selected: hidden ? null : price(amount),
+    main: hidden ? null : price(amount),
+    promos: [],
+  });
+  const always = [
+    ["Basic", tier("Basic", 1000)],
+    ["ISIC", tier("ISIC", 950)],
+    ["B2B", tier("B2B", 980)],
+  ] as [string, TierResult][];
+  // Gold hidden: the club has no price, so the two followers are not a missing price
+  assert.equal(benefitsComplete(new Map([...always, ["Gold", tier("Gold", 1000, true)]])), true);
+  // Gold visible: the club rows are the point of the card, so the followers are required
+  const visible = new Map([...always, ["Gold", tier("Gold", 900)]]);
+  assert.equal(benefitsComplete(visible), false);
+  assert.equal(benefitsComplete(new Map([...visible, ["Silver", tier("Silver", 950)], ["Bronze", tier("Bronze", 980)]])), true);
+  // a tier that is always required and did not answer keeps the card partial
+  assert.equal(benefitsComplete(new Map([...always.filter(([n]) => n !== "B2B"), ["Gold", tier("Gold", 1000, true)]])), false);
 });
 
 test("an incoming shipment stays on the way when schema.org calls it in stock", () => {
