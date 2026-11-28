@@ -7,18 +7,18 @@
   "scripts": {
     "start": "node src/server.ts",
     "check": "tsc --noEmit",
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.ts\"",
     "landing-demo": "node scripts/make-landing-demo.mjs"
   },
   "engines": {
     "node": ">=23.6"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.6.11",
     "discord-html-transcripts-v2": "^4.6.2",
-    "discord.js": "^14.27.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "typescript": "^5.9.0"
+    "discord.js": "^14.28.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2"
   }
 }

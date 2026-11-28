@@ -17,8 +17,10 @@ const Container = require("discord-html-transcripts-v2/dist/generator/renderers/
 const Section = require("discord-html-transcripts-v2/dist/generator/renderers/components/section/Section").default;
 const Spacing = require("discord-html-transcripts-v2/dist/generator/renderers/components/Spacing").default;
 const { globalStyles } = require("discord-html-transcripts-v2/dist/generator/renderers/components/styles");
-const { DiscordMessages, DiscordMessage, DiscordAttachments } = require("@derockdev/discord-components-react");
-const { renderToString } = require("@derockdev/discord-components-core/hydrate");
+// the Discord web components come with discord-html-transcripts-v2, and npm does not always put them where this script could see them
+const fromTranscripts = createRequire(require.resolve("discord-html-transcripts-v2"));
+const { DiscordMessages, DiscordMessage, DiscordAttachments } = fromTranscripts("@derockdev/discord-components-react");
+const { renderToString } = fromTranscripts("@derockdev/discord-components-core/hydrate");
 
 const BASE = process.env.DEMO_BASE ?? "http://127.0.0.1:8484";
 const UA = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)";
