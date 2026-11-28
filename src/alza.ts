@@ -13,7 +13,7 @@ import { CZ, formatMoney, type Shop, type ShopCode } from "./shops.ts";
 export { stopSidecar } from "./fetcher.ts";
 
 export interface BenefitEntry {
-  kind: "sale" | "blackfriday" | "coupon" | "alzaplus" | "cashback" | "tradein" | "promo" | "tier" | "levy";
+  kind: "sale" | "blackfriday" | "coupon" | "alzaplus" | "cashback" | "tradein" | "promo" | "tier" | "levy" | "quantity";
   label: string;
   price: number;
   priceText: string;
@@ -23,6 +23,29 @@ export interface BenefitEntry {
   note?: string;
   // the code of a coupon, so the line can set it in monospace whatever the language of the label
   coupon?: string;
+  // the price ladder of a quantity discount, without the base row (1 piece)
+  tiers?: QuantityTier[];
+}
+
+// A quantity step as the product JSON gives it, with the percent unrounded.
+export interface QuantityStep {
+  from: number;
+  percent: number;
+}
+
+// One row of the "Množstevní slevy" ladder on the product page: from this count up, this price per piece.
+export interface QuantityTier {
+  from: number;
+  label: string;
+  price: number;
+  priceText: string;
+  percent: number | null;
+}
+
+export interface QuantityDiscount {
+  // Alza's own line, e.g. "Sleva už od 2 balení, až 22 %"
+  text: string;
+  tiers: QuantityTier[];
 }
 
 export interface ProductData {
@@ -35,6 +58,7 @@ export interface ProductData {
   condition?: string;
   rating: number | null;
   ratingCount: number | null;
+  quantity?: QuantityDiscount;
   brand: string | null;
   description?: string;
   image: string | null;
@@ -443,19 +467,64 @@ export function buildBenefits(byTier: Map<string, TierResult>, shop: Shop = CZ, 
     });
   }
 
-  const KIND_ORDER: Record<BenefitEntry["kind"], number> = {
-    sale: -1,
-    blackfriday: -1,
-    coupon: 0,
-    alzaplus: 1,
-    cashback: 2,
-    tradein: 3,
-    promo: 4,
-    tier: 5,
-    levy: 6,
-  };
-  entries.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.price - b.price);
+  entries.sort((a, b) => BENEFIT_KIND_ORDER[a.kind] - BENEFIT_KIND_ORDER[b.kind] || a.price - b.price);
   return { entries: entries.slice(0, 8), complete: benefitsComplete(byTier, shop) };
+}
+
+// The order of the benefit lines on the card: the direct price cuts first, then the programs, the club, the levy.
+const BENEFIT_KIND_ORDER: Record<BenefitEntry["kind"], number> = {
+  sale: -1,
+  blackfriday: -1,
+  coupon: 0,
+  alzaplus: 1,
+  cashback: 2,
+  tradein: 3,
+  promo: 4,
+  quantity: 5,
+  tier: 6,
+  levy: 7,
+};
+
+export function sortBenefits(entries: BenefitEntry[]): BenefitEntry[] {
+  return entries.sort((a, b) => BENEFIT_KIND_ORDER[a.kind] - BENEFIT_KIND_ORDER[b.kind] || a.price - b.price);
+}
+
+// The quantity discount of the page becomes one benefit line: the cheapest per-piece price as the price,
+// the whole ladder (without the base row) in tiers, so the line can show every step.
+export function withQuantity(benefits: BenefitEntry[], q: QuantityDiscount | null, shop: Shop): BenefitEntry[] {
+  if (!q) return benefits;
+  const t = texts(shop.lang);
+  const ladder = q.tiers.filter((x) => x.from > 1);
+  if (ladder.length === 0) return benefits;
+  const base = q.tiers.find((x) => x.from === 1)?.price ?? null;
+  const best = ladder.reduce((a, b) => (b.price < a.price ? b : a));
+  const percent = base && base > best.price ? ((base - best.price) / base) * 100 : null;
+  const half = shop.currency === "EUR" ? 0.005 : 0.5;
+  const percentShown = percent === null || !base ? null : Math.floor(percent + (half * 100) / base + 1e-9);
+  return sortBenefits([
+    ...benefits,
+    {
+      kind: "quantity",
+      label: t.quantity,
+      price: best.price,
+      priceText: best.priceText,
+      percent,
+      percentShown,
+      // a long ladder keeps its last step, which is the cheapest one
+      tiers: ladder.length > 3 ? [...ladder.slice(0, 2), ladder.at(-1)!] : ladder,
+    },
+  ]);
+}
+
+// The page prints whole prices, so a percent worked out from them is off on cheap goods. The product JSON has the real one.
+export function withExactPercents(q: QuantityDiscount | null, steps: QuantityStep[]): QuantityDiscount | null {
+  if (!q) return q;
+  const tiers = q.tiers.map((t) => {
+    const step = steps.find((s) => s.from === t.from);
+    // a step that is far from what the page shows belongs to something else
+    return step && t.percent !== null && Math.abs(step.percent - t.percent) <= 3 ? { ...t, percent: step.percent } : t;
+  });
+  return { ...q, tiers };
 }
 
 // Schema.org reports an incoming shipment as InStock, because it can already be ordered. The stock label is what the page shows.
@@ -524,6 +593,61 @@ export function conditionText(itemCondition: unknown, html: string, shop: Shop =
   if (kind !== "UsedCondition") return null;
   const grade = shop.code === "cz" ? /class="stcStock[^"]*"[^>]*title="\s*(Rozbaleno|Zánovní|Použité)/.exec(html)?.[1] : undefined;
   return grade ?? t.used;
+}
+
+// The unrounded percents of the quantity steps are only in the product JSON, not on the page. They are a detail of one line of the
+// card, so they are asked for only when the page has a quantity discount, only from providers that cost nothing, and not for long.
+const STEPS_BUDGET_MS = 1500;
+
+function quantitySteps(raw: unknown): QuantityStep[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => ({ from: Number(x?.quantityFrom), percent: Number(x?.percentDiscount) })).filter((s) => Number.isInteger(s.from) && Number.isFinite(s.percent));
+}
+
+// never rejects
+async function fetchQuantitySteps(shop: Shop, id: string, budgetMs: number): Promise<QuantityStep[]> {
+  if (budgetMs <= 0) return [];
+  const url = `https://${shop.host}/api/router/legacy/catalog/product/${id}?country=${shop.country}&pgrik=p__26752&ucik=u__401f1`;
+  const asked = fetchUrl(url, { headers: { Accept: "application/json" }, timeoutMs: budgetMs, workerStaggerMs: 400, optional: true, country: shop.country })
+    .then((res) => (res.status === 200 ? quantitySteps(JSON.parse(res.body)?.data?.quantityDiscounts) : []))
+    .catch(() => []);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<QuantityStep[]>((resolve) => (timer = setTimeout(() => resolve([]), budgetMs)));
+  const steps = await Promise.race([asked, late]);
+  clearTimeout(timer);
+  return steps;
+}
+
+// The "Množstevní slevy" block of the page: a promo line and a hidden repeater with one row per count
+// (data-cntfrom/data-cntto, the label and the per-piece price in colValue, e.g. "139,-/balení").
+
+// "139,-", "1 299,-", "1.299,00 €", "5,29 €", "2 090 Ft": a separator followed by one or two digits at the end is the decimal one,
+// every other one only groups the thousands.
+function parsePriceText(raw: string): number | null {
+  const run = /\d(?:[\d\s.,]*\d)?/.exec(decodeEntities(raw))?.[0];
+  if (!run) return null;
+  const decimals = /[.,](\d{1,2})$/.exec(run);
+  const whole = (decimals ? run.slice(0, decimals.index) : run).replace(/\D/g, "");
+  const v = Number(decimals ? `${whole}.${decimals[1]}` : whole);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+export function parseQuantityDiscount(html: string, shop: Shop): QuantityDiscount | null {
+  const text = /class="[^"]*\bquantityDiscountText\b[^"]*"[^>]*>([^<]+)</i.exec(html)?.[1];
+  const start = html.indexOf("quantityRepeater");
+  if (start < 0 && !text) return null;
+  const seg = start >= 0 ? html.slice(start, start + 8000) : "";
+  const rows = [...seg.matchAll(/data-cntfrom=["'](\d+)["']\s+data-cntto=["'](\d+)["'][\s\S]*?colLabel[^>]*>\s*([^<]+?)\s*<[\s\S]*?colValue[^>]*>\s*([^<]+?)\s*</gi)];
+  const tiers: QuantityTier[] = [];
+  for (const m of rows) {
+    const price = parsePriceText(m[4]!);
+    if (price === null) continue;
+    tiers.push({ from: Number(m[1]), label: decodeEntities(m[3]!).trim(), price, priceText: formatMoney(shop, price, true), percent: null });
+  }
+  if (tiers.length === 0) return text ? { text: decodeEntities(text).trim(), tiers: [] } : null;
+  const base = tiers.find((t) => t.from === 1)?.price ?? tiers[0]!.price;
+  for (const t of tiers) t.percent = base > t.price ? ((base - t.price) / base) * 100 : null;
+  return { text: text ? decodeEntities(text).trim() : "", tiers };
 }
 
 export class UpstreamError extends Error {
@@ -751,7 +875,11 @@ export async function fetchProduct(
   const benefitsStarted = Date.now();
   const benefitsDeadline = benefitsStarted + BENEFITS_BUDGET_MS;
   let blackFriday: ReturnType<typeof blackFridayEntry> = null;
-  const lateWithBf = onLateBenefits && ((b: BenefitEntry[], complete: boolean) => onLateBenefits(withBlackFriday(b, blackFriday, shop), complete));
+  let quantity: QuantityDiscount | null = null;
+  let steps: QuantityStep[] = [];
+  // the page decorations (Black Friday box, quantity discount) are added to the tiers on the way out, also on the late update
+  const decorate = (b: BenefitEntry[]): BenefitEntry[] => withQuantity(withBlackFriday(b, blackFriday, shop), withExactPercents(quantity, steps), shop);
+  const lateWithBf = onLateBenefits && ((b: BenefitEntry[], complete: boolean) => onLateBenefits(decorate(b), complete));
   // The id is already known from the link, so the price tiers load while the page itself is still on its way.
   const benefitsPromise: Promise<BenefitsResult> = BENEFITS_ENABLED
     ? fetchBenefits(shop, id, benefitsDeadline).catch((e) => {
@@ -759,11 +887,14 @@ export async function fetchProduct(
         return { entries: [], complete: false };
       })
     : Promise.resolve({ entries: [], complete: true });
-  // never rejects, so it is safe to leave behind when the page below fails
+  // neither of these two rejects, so they are safe to leave behind when the page below fails
   const historyPromise = fetchPriceHistory(shop, id);
 
   const html = await getHtml(shop, path);
   blackFriday = blackFridayEntry(html, shop);
+  quantity = parseQuantityDiscount(html, shop);
+  // does not hold the card past the time the price tiers have
+  const stepsPromise = quantity?.tiers.length ? fetchQuantitySteps(shop, id, Math.min(STEPS_BUDGET_MS, benefitsDeadline - Date.now())) : Promise.resolve([]);
   const p = extractProductJsonLd(html);
   if (!p) throw new Error("no Product JSON-LD found on the page");
 
@@ -820,13 +951,16 @@ export async function fetchProduct(
   const partial = !b.complete;
   track({ url: "/benefits", name: "benefits", data: { outcome: b.complete ? "in_time" : "late", ms: Date.now() - benefitsStarted, entries: b.entries.length, complete: b.complete } });
   b.later
-    ?.then((l) => {
+    ?.then(async (l) => {
+      // a late update replaces the rows, so it needs the exact percents as well
+      steps = await stepsPromise;
       console.log(`[benefits] ${id} completed late (${l.entries.length})`);
       deliver(l);
     })
     .catch(lateFailed);
 
   const history = await historyPromise;
+  steps = await stepsPromise;
 
   return {
     id,
@@ -838,11 +972,12 @@ export async function fetchProduct(
     ...(condition ? { condition } : {}),
     rating,
     ratingCount,
+    ...(quantity ? { quantity } : {}),
     brand: p.brand?.name ? String(p.brand.name) : null,
     ...(cleanDescription(p.description) ? { description: cleanDescription(p.description)! } : {}),
     image,
     canonicalUrl,
-    benefits: withBlackFriday(benefits, blackFriday, shop),
+    benefits: decorate(benefits),
     ...(partial ? { partial: true as const } : {}),
     fetchedAt: new Date().toISOString(),
     ...(shop.code === "cz" ? {} : { shop: shop.code }),

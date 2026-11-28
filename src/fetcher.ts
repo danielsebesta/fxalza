@@ -16,6 +16,8 @@ export interface FetchOpts {
   country?: string;
   // Set for calls that can wait: the second worker then starts this many ms after the first instead of alongside it, which halves the worker requests.
   workerStaggerMs?: number;
+  // A side line the answer can do without: no paid provider is asked, and a failure does not count against the providers the page needs.
+  optional?: boolean;
 }
 
 export interface Provider {
@@ -205,14 +207,14 @@ const providers: Provider[] = [
     enabled: () => process.env.SIDECAR_DISABLED !== "1",
     async run(url, opts, timeoutMs) {
       let res = await sidecar.request(url, { headers: opts.headers, timeoutMs });
-      if (!res.error && res.status === 403 && sidecarBlockMs === 0) {
+      if (!res.error && res.status === 403 && sidecarBlockMs === 0 && !opts.optional) {
         // a fresh session sometimes gets a one-off 403, a second try is cheaper than a paid fallback
         await new Promise((resolve) => setTimeout(resolve, 300));
         const again = await sidecar.request(url, { headers: opts.headers, timeoutMs });
         console.log(`[fetch] sidecar 403 retried -> ${again.error ? "error" : again.status} ${new URL(url).pathname}`);
         res = again;
       }
-      if (!res.error && res.status === 403) {
+      if (!res.error && res.status === 403 && !opts.optional) {
         // the requests of one product start together, so only the first of them to fail counts
         if (sidecarBlockedUntil <= Date.now()) {
           sidecarBlockMs = Math.min(sidecarBlockMs ? sidecarBlockMs * 2 : SIDECAR_BLOCK_MS, SIDECAR_BLOCK_MAX_MS);
@@ -345,10 +347,12 @@ async function attempt(p: Provider, url: string, opts: FetchOpts, timeoutMs: num
     outcome = { error: `${p.name}: ${e instanceof Error ? e.message : e}` };
   }
   track({ url: "/upstream", name: "upstream", data: { provider: p.name, ok: false, status, ms: Date.now() - started, paid } });
-  const streak = (failStreak.get(p.name) ?? 0) + 1;
-  failStreak.set(p.name, streak);
-  if (paid || streak >= SIDECAR_STREAK) {
-    downUntil.set(p.name, Date.now() + (paid ? COOLDOWN_MS : SIDECAR_COOLDOWN_MS));
+  if (!opts.optional) {
+    const streak = (failStreak.get(p.name) ?? 0) + 1;
+    failStreak.set(p.name, streak);
+    if (paid || streak >= SIDECAR_STREAK) {
+      downUntil.set(p.name, Date.now() + (paid ? COOLDOWN_MS : SIDECAR_COOLDOWN_MS));
+    }
   }
   console.warn(`[fetch] ${p.name} failed for ${url} (${outcome.error}), trying next`);
   return outcome;
@@ -377,6 +381,7 @@ export async function fetchWith(list: Provider[], url: string, opts: FetchOpts =
 
   for (const [n, p] of order.entries()) {
     if (winner || overloaded) break;
+    if (opts.optional && !p.free && p.name !== "sidecar") continue;
     if (!runnable(p)) continue;
     const controller = new AbortController();
     const job: Promise<void> = attempt(p, url, opts, timeoutMs, controller.signal)

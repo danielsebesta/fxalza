@@ -445,6 +445,17 @@ function buttonUrl(url: string, short: string): string {
 }
 
 function benefitLine(e: BenefitEntry, rich = false, custom = false): string {
+  // A quantity discount shows only its percents, "2 balení **-10 %** · 3 a více balení **-15 %**": they come off whatever price
+  // the account has, so a price here would be right for some readers only.
+  if (e.kind === "quantity") {
+    const ladder = (e.tiers ?? [])
+      .flatMap((t) => {
+        const percent = Math.round(t.percent ?? 0);
+        return percent > 0 ? [`${t.label} ${rich ? `**-${percent} %**` : `-${percent} %`}`] : [];
+      })
+      .join(" · ");
+    if (ladder) return `${benefitEmoji(e, custom)} ${rich ? mdEsc(e.label) : e.label}: ${ladder}`;
+  }
   const shownPercent = e.percentShown ?? (e.percent === null ? null : Math.round(e.percent));
   const pct = shownPercent !== null && shownPercent > 0 ? ` (-${String(shownPercent).replace(".", ",")} %)` : "";
   const was = e.wasPriceText ? `${e.wasPriceText} → ` : "";
